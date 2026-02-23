@@ -50,6 +50,13 @@
       "format": "date-time",
       "description": "Last modification timestamp",
       "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "memory_strategy": {
+      "oneOf": [
+        { "$ref": "../common/MemoryStrategy.json" },
+        { "type": "null" }
+      ],
+      "description": "Conversation memory management strategy; null means default (full history)"
     }
   },
   "required": ["session_id", "tenant_id", "user_id", "session_type_id", "available_capabilities", "lifecycle_state", "created_at", "updated_at"],

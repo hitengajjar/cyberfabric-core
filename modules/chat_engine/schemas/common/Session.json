@@ -70,6 +70,13 @@
       "type": ["string", "null"],
       "format": "date-time",
       "description": "Timestamp when session was archived"
+    },
+    "memory_strategy": {
+      "oneOf": [
+        { "$ref": "./MemoryStrategy.json" },
+        { "type": "null" }
+      ],
+      "description": "Conversation memory management strategy; null means default (full history). Controlled by feature-context-management (p2)."
     }
   },
   "required": ["session_id", "tenant_id", "user_id", "session_type_id", "available_capabilities", "lifecycle_state", "created_at", "updated_at"],
