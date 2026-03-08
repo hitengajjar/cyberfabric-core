@@ -52,13 +52,8 @@ fn main() {
     _resolver.resolve_to_uuids(&["gts.acme.core.events.*".to_owned()]);
 }
 
+#[derive(Default)]
 struct MockResolver;
-
-impl Default for MockResolver {
-    fn default() -> Self {
-        Self
-    }
-}
 
 impl MockResolver {
     fn resolve_to_uuids(&self, _patterns: &[String]) -> Vec<String> {

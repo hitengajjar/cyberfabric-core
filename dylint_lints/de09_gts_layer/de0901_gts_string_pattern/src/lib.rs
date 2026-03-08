@@ -34,6 +34,10 @@ dylint_linting::declare_pre_expansion_lint! {
 }
 
 impl EarlyLintPass for De0901GtsStringPattern {
+    fn check_crate_post(&mut self, _cx: &EarlyContext<'_>, _krate: &rustc_ast::Crate) {
+        SKIP_SPANS.with(|s| s.borrow_mut().clear());
+    }
+
     fn check_attribute(&mut self, cx: &EarlyContext<'_>, attr: &Attribute) {
         self.check_struct_to_gts_schema_attr(cx, attr);
     }
@@ -69,13 +73,7 @@ impl EarlyLintPass for De0901GtsStringPattern {
             return;
         }
 
-        if item_name.ends_with("_WILDCARD") {
-            // Compliant name — skip-list so check_expr doesn't re-flag the literal.
-            SKIP_SPANS.with(|spans| {
-                collect_nested_spans(init, &mut spans.borrow_mut());
-            });
-        } else {
-            // Non-compliant name — flag an error.
+        if !item_name.ends_with("_WILDCARD") {
             cx.span_lint(DE0901_GTS_STRING_PATTERN, item.span, |diag| {
                 diag.primary_message(format!(
                     "GTS wildcard string in `const`/`static` `{item_name}` must have a name ending with `_WILDCARD` (DE0901)"
@@ -87,11 +85,12 @@ impl EarlyLintPass for De0901GtsStringPattern {
                     "rename to `{item_name}_WILDCARD` or use a non-wildcard value"
                 ));
             });
-            // Also skip-list the span so check_expr doesn't double-report.
-            SKIP_SPANS.with(|spans| {
-                collect_nested_spans(init, &mut spans.borrow_mut());
-            });
         }
+
+        // Skip-list the span so check_expr doesn't re-flag (or double-report) the literal.
+        SKIP_SPANS.with(|spans| {
+            collect_nested_spans(init, &mut spans.borrow_mut());
+        });
     }
 
     fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &Expr) {

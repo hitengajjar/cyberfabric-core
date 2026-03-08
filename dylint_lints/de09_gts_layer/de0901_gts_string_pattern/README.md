@@ -51,7 +51,7 @@ protects security-critical permission checks.
   strings (they are allowed and marked as intentional wildcard constants).
 * Strings passed to `str.starts_with("gts.")` are ignored.
 * Inline suppressions are supported through `#[allow(de0901_gts_string_pattern)]`
-  on a binding or expression when a wildcard must be hard-coded outside of the
+  on a binding or expression when a wildcard must be hard-coded outside the
   recognised helper APIs.
 
 ## `_WILDCARD` naming convention for constants
