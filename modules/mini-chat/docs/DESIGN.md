@@ -6587,7 +6587,141 @@ Note: per-model `max_file_size_mb` is available from **CCM API**: `GET /policies
 | `orphan_watchdog.enabled` | `bool` | — | — | **ConfigMap** |
 | `orphan_watchdog.scan_interval_secs` | `integer` | `60` | — | **ConfigMap** |
 
-### B.9.2 Outbox dispatcher
+##### Orphan watchdog semantics
+
+**Definition**:
+
+An orphan turn is a `chat_turns` row that remains in `state = 'running'` after the configured orphan timeout has elapsed and has not reached any terminal state.
+
+For P1, the watchdog MUST treat a turn as orphaned when all of the following are true:
+
+1. `state = 'running'`
+2. `started_at <= now() - orphan_watchdog.timeout_seconds`
+3. no terminal transition (`completed`, `failed`, `cancelled`) and deleted_at IS NULL has been persisted for that turn
+
+**Execution model**:
+
+Automatic orphan cleanup is executed by a single active background worker leader.
+
+The worker MUST depend on a `LeaderElector` abstraction rather than directly on deployment-specific primitives.
+
+**LeaderElector responsibilities**:
+
+- Determine whether the current process is the active orphan watchdog leader.
+- Provide a mechanism to periodically re-check leadership.
+- Allow the worker to stop claiming or processing new orphan candidates if leadership is lost.
+
+**Implementations**:
+
+- **`k8s::LeaderElector`** — Used in Kubernetes deployments. Leadership MUST be determined using Kubernetes Lease or an equivalent cluster leader election mechanism. At most one pod may hold leadership at a time. Only the current leader MAY claim and process orphan turns.
+- **`NoopLeaderElector`** — Used in environments without Kubernetes (for example local development, single-instance deployments, or deployments without a cluster control plane). `NoopLeaderElector` MUST always report that the current process is leader. This mode assumes that only one Mini Chat process runs or that duplicate watchdog execution is otherwise prevented by deployment policy.
+
+Leader election determines **who runs the watchdog**, not **how orphan detection is evaluated**.
+
+**Claiming and idempotency**:
+
+The orphan watchdog MUST periodically scan for candidate orphan turns.
+
+When transitioning a turn, the worker MUST perform an atomic conditional update guarded by the current turn state so that only rows still in `state = 'running'` are changed.
+For example (illustrative SQL pattern):
+
+```sql
+UPDATE chat_turns
+SET
+    state = 'failed',
+    error_code = 'orphan_timeout',
+    updated_at = now()
+WHERE
+    id = $1
+    AND state = 'running'
+    AND started_at <= now() - interval '1 second' * $timeout_seconds
+RETURNING id;
+```
+
+A turn already moved to a terminal state by the normal request path or by a prior watchdog pass MUST NOT be processed again.
+
+**Why the orphan watchdog finalizes usage**
+
+Mini Chat billing guarantees that every turn that successfully reached the preflight reserve phase MUST produce exactly one usage settlement event.
+
+A turn that reaches `state = 'running'` has already completed preflight and has taken a quota reserve (`reserve_tokens`, `reserved_credits_micro`, and related fields in `chat_turns`).
+Normally the request processing path emits the usage settlement event when the provider finishes and the turn transitions to a terminal state.
+
+However, failures such as:
+
+- process crash
+- network interruption
+- lost provider callback
+- unexpected worker restart
+
+may leave a turn permanently stuck in `state = 'running'`.
+
+Such turns are considered **orphans**.
+
+Without corrective action these turns would:
+
+- keep quota reserves indefinitely
+- never produce a billing settlement event
+- leave the external billing system (CCM) in an inconsistent state.
+
+The orphan watchdog therefore acts as a **recovery mechanism for the turn lifecycle**.
+
+When it detects an orphan turn, the watchdog transitions the turn to a terminal failure state and performs the same deterministic settlement logic used for other abnormal outcomes (for example ABORTED or FAILED without provider usage).
+
+This settlement uses the preflight snapshot persisted in `chat_turns`:
+
+- `reserve_tokens`
+- `max_output_tokens_applied`
+- `reserved_credits_micro`
+- `policy_version_applied`
+- `minimal_generation_floor_applied`
+
+Because these values were persisted at preflight, the system can deterministically compute estimated settlement even when no provider usage information is available.
+
+The watchdog therefore emits the required `modkit_outbox_events` usage record **not because the watchdog generated tokens**, but because it must finalize the lifecycle of the abandoned turn and ensure that exactly one billing event is produced for that turn.
+
+This preserves the Mini Chat invariant:
+
+> Every turn that took a quota reserve MUST produce exactly one usage settlement event.
+
+**Required effects on orphan detection**:
+
+When an orphan turn is detected, the watchdog MUST:
+
+1. transition the turn to `state = 'failed'`
+2. record a machine-readable failure reason equivalent to `orphan_timeout`
+3. finalize bounded quota settlement according to the existing turn billing rules
+4. emit the required `modkit_outbox_events` row for billing/usage attribution
+
+The watchdog MUST NOT create or modify `messages` rows.
+
+**Late provider response rule**:
+
+If a provider response, SSE event, or callback arrives after the turn has already been transitioned to terminal failure by the orphan watchdog, that late provider result MUST NOT reopen or overwrite the turn.
+
+**Operational model**:
+
+The watchdog runs periodically according to `orphan_watchdog.scan_interval_secs`.
+
+Orphan cleanup is asynchronous and MUST NOT block any user-visible request path.
+
+**Observability (P1)**:
+
+- `mini_chat_orphan_detected_total` (counter) — turns identified as orphaned
+- `mini_chat_orphan_failed_total` (counter) — orphan turns successfully transitioned to terminal failure
+- `mini_chat_orphan_scan_duration_seconds` (histogram) — watchdog scan duration
+
+### B.9.2 Cleanup worker
+
+| Parameter | Type | Default | Valid range | Source |
+|-----------|------|---------|-------------|--------|
+| `cleanup_poll_interval_seconds` | `integer` | `60` | `1..=3600` | **ConfigMap** |
+| `max_cleanup_attempts` | `integer` | `10` | `1..=100` | **ConfigMap** |
+| `cleanup_batch_size` | `integer` | `50` | `1..=1000` | **ConfigMap** |
+
+**See also**: `Cleanup on Chat Deletion` for lifecycle invariants, claiming strategy, retry/backoff semantics, and observability.
+
+### B.9.3 Outbox dispatcher
 
 | Parameter | Type | Default | Valid range | Source |
 |-----------|------|---------|-------------|--------|
@@ -6598,7 +6732,7 @@ Note: per-model `max_file_size_mb` is available from **CCM API**: `GET /policies
 | `outbox_dispatcher.lease_duration` | — | — | — | **ConfigMap** |
 | `outbox_dispatcher.poll_interval` | — | — | — | **ConfigMap** |
 
-### B.9.3 Thread summary worker
+### B.9.4 Thread summary worker
 
 | Parameter | Type | Default | Source |
 |-----------|------|---------|--------|
