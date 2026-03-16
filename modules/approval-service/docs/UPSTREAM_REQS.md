@@ -78,7 +78,7 @@ Approve multiple
 **Behavior**:
 - Atomic operation: all succeed or all fail
 - Validates actor has permission for all resources
-- Emits single batch event or individual events per resource
+- Emits individual `approval_status_changed` event per resource (required for per-model cache invalidation in Model Registry)
 
 **Source**: [`cpt-cf-model-registry-fr-bulk-operations`](../../model-registry/docs/PRD.md)
 
@@ -205,7 +205,7 @@ Event emitted when approval status changes.
 | revoked | approved | Admin re-approval |
 | rejected | approved | Admin re-approval |
 
-**Source**: [`cpt-cf-model-registry-adr-approval-delegation`](../../model-registry/docs/ADR/0002-cpt-cf-model-registry-adr-approval-delegation.md)
+**Source**: [PRD State Machine](../../model-registry/docs/PRD.md) (section 3.1, ModelApproval — includes `rejected → approved` and `revoked → approved` transitions), [`cpt-cf-model-registry-adr-approval-delegation`](../../model-registry/docs/ADR/0002-cpt-cf-model-registry-adr-approval-delegation.md) (covers core transitions)
 
 ---
 
