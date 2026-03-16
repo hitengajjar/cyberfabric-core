@@ -662,7 +662,7 @@ pub fn parse_filter_string(raw: &str) -> Result<ParsedFilter, Error> {
         }
     }
 
-    let ast_src = od::parse_str(raw).map_err(|e| Error::InvalidFilter(format!("{e:?}")))?;
+    let ast_src = od::parse_str(raw).map_err(|e| Error::InvalidFilter(format!("{e}")))?;
 
     let node_count = count_ast_nodes(&ast_src);
     let expr: ast::Expr = ast_src.into();

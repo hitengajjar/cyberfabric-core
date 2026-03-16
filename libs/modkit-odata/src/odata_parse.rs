@@ -20,7 +20,7 @@ use uuid::Uuid;
 pub fn parse_str(query: impl AsRef<str>) -> Result<Expr, ParseError> {
     match odata_filter::parse_str(query.as_ref().trim()) {
         Ok(expr) => expr,
-        Err(_error) => Err(ParseError::Parsing),
+        Err(error) => Err(ParseError::Parsing(error.to_string())),
     }
 }
 

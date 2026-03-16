@@ -9,8 +9,8 @@ pub use crate::odata_parse::parse_str;
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ParseError {
     /// Error during general parsing.
-    #[error("Error during general parsing.")]
-    Parsing,
+    #[error("Error during general parsing: {0}")]
+    Parsing(String),
 
     /// Error parsing a UUID.
     #[error("Error parsing a UUID.")]

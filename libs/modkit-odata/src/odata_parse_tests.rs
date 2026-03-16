@@ -934,3 +934,22 @@ fn deeply_nested_unmatched_parens_does_not_hang() {
     let result = parse_str("((((EAEAEAE(((EAEA((AE(((EAEAEEE");
     assert!(result.is_err());
 }
+
+#[test]
+fn parse_error_preserves_position_info() {
+    use crate::odata_filters::ParseError;
+
+    let result = parse_str("name eq AND broken");
+    let err = result.unwrap_err();
+
+    // Must be Parsing(String) with position detail, not a bare unit variant
+    match &err {
+        ParseError::Parsing(msg) => {
+            assert!(
+                msg.contains("error at") && msg.contains("expected"),
+                "PEG error should contain position and expectation info, got: {msg}"
+            );
+        }
+        other => panic!("expected ParseError::Parsing(String), got: {other:?}"),
+    }
+}
