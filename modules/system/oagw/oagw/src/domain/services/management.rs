@@ -5,8 +5,8 @@ use std::net::IpAddr;
 
 use crate::domain::error::DomainError;
 use crate::domain::model::{
-    CreateRouteRequest, CreateUpstreamRequest, Endpoint, ListQuery, Route, UpdateRouteRequest,
-    UpdateUpstreamRequest, Upstream,
+    CreateRouteRequest, CreateUpstreamRequest, Endpoint, ListQuery, MatchRules, Route,
+    UpdateRouteRequest, UpdateUpstreamRequest, Upstream,
 };
 use crate::domain::repo::{RouteRepository, UpstreamRepository};
 
@@ -276,6 +276,7 @@ impl ControlPlaneService for ControlPlaneServiceImpl {
             enabled: req.enabled,
         };
 
+        validate_match_rules(&route.match_rules)?;
         self.check_route_overlap(&route, None).await?;
 
         self.routes.create(route).await.map_err(DomainError::from)
@@ -327,6 +328,7 @@ impl ControlPlaneService for ControlPlaneServiceImpl {
         existing.priority = req.priority;
         existing.enabled = req.enabled;
 
+        validate_match_rules(&existing.match_rules)?;
         self.check_route_overlap(&existing, Some(existing.id))
             .await?;
 
@@ -641,6 +643,22 @@ impl ControlPlaneServiceImpl {
 // ===========================================================================
 // Free functions — validation, permissions, visibility, config merge, alias
 // ===========================================================================
+
+/// Ensure exactly one of `http` or `grpc` is present in the match rules.
+///
+/// Rejects routes where both fields are `None` (matches nothing) or both
+/// are `Some` (ambiguous protocol).
+fn validate_match_rules(rules: &MatchRules) -> Result<(), DomainError> {
+    match (&rules.http, &rules.grpc) {
+        (None, None) => Err(DomainError::validation(
+            "match rules must specify exactly one of 'http' or 'grpc'",
+        )),
+        (Some(_), Some(_)) => Err(DomainError::validation(
+            "match rules must specify exactly one of 'http' or 'grpc', not both",
+        )),
+        _ => Ok(()),
+    }
+}
 
 /// Validate the endpoint list for a server configuration.
 ///
