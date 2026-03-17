@@ -5,6 +5,7 @@
 
 extern crate rustc_ast;
 
+use lint_utils::is_in_contract_module_ast;
 use rustc_ast::{Item, ItemKind, TyKind, VisibilityKind};
 use rustc_lint::{EarlyLintPass, LintContext};
 
@@ -53,6 +54,12 @@ dylint_linting::declare_early_lint! {
 
 impl EarlyLintPass for De1303NoPrimitiveTypeAlias {
     fn check_item(&mut self, cx: &rustc_lint::EarlyContext<'_>, item: &Item) {
+        // Only enforce in contract modules — SDK/contract boundaries are where
+        // transparent primitive aliases cause API type-safety problems.
+        if !is_in_contract_module_ast(cx, item) {
+            return;
+        }
+
         let ItemKind::TyAlias(ty_alias) = &item.kind else {
             return;
         };

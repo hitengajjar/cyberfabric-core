@@ -186,7 +186,7 @@ impl<'tcx> hir::intravisit::Visitor<'tcx> for ZeroingVisitor<'tcx, '_> {
                                 .type_dependent_def_id(expr.hir_id)
                                 .map_or(false, |did| {
                                     let krate = self.cx.tcx.crate_name(did.krate);
-                                    krate.as_str() == "core" || krate.as_str() == "std"
+                                    krate == *SYM_CORE || krate == *SYM_STD
                                 });
                             // Use adjusted type so Vec<u8> auto-derefs to [u8]
                             let recv_ty = self.typeck.expr_ty_adjusted(recv);
