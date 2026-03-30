@@ -73,7 +73,7 @@ pub mod state {
     #[derive(Debug, Clone, Copy)]
     pub struct AuthNotSet;
 
-    /// Marker for auth requirement set (either `require_auth` or public)
+    /// Marker for auth requirement set (either `authenticated` or public)
     #[derive(Debug, Clone, Copy)]
     pub struct AuthSet;
 
@@ -138,10 +138,6 @@ pub struct ParamSpec {
     pub param_type: String, // JSON Schema type (string, integer, etc.)
 }
 
-pub trait AuthReqResource: AsRef<str> {}
-
-pub trait AuthReqAction: AsRef<str> {}
-
 pub trait LicenseFeature: AsRef<str> {}
 
 impl<T: LicenseFeature + ?Sized> LicenseFeature for &T {}
@@ -189,13 +185,6 @@ pub struct ResponseSpec {
     pub schema_name: Option<String>,
 }
 
-/// Security requirement for an operation (resource:action pattern)
-#[derive(Clone, Debug)]
-pub struct OperationSecRequirement {
-    pub resource: String,
-    pub action: String,
-}
-
 /// License requirement specification for an operation
 #[derive(Clone, Debug)]
 pub struct LicenseReqSpec {
@@ -216,8 +205,9 @@ pub struct OperationSpec {
     pub responses: Vec<ResponseSpec>,
     /// Internal handler id; can be used by registry/generator to map a handler identity
     pub handler_id: String,
-    /// Security requirement for this operation (if any)
-    pub sec_requirement: Option<OperationSecRequirement>,
+    /// Whether this operation requires authentication.
+    /// `true` = authenticated endpoint, `false` = public endpoint.
+    pub authenticated: bool,
     /// Explicitly mark route as public (no auth required)
     pub is_public: bool,
     /// Optional rate & concurrency limits for this operation
@@ -441,7 +431,7 @@ impl<S> OperationBuilder<Missing, Missing, S, AuthNotSet> {
                 request_body: None,
                 responses: Vec::new(),
                 handler_id,
-                sec_requirement: None,
+                authenticated: false,
                 is_public: false,
                 rate_limit: None,
                 allowed_request_content_types: None,
@@ -821,9 +811,9 @@ where
     /// Set (or explicitly clear) the license feature requirement for this operation.
     ///
     /// This method is only available after the auth requirement has been decided
-    /// (i.e. after calling `require_auth(...)`).
+    /// (i.e. after calling `authenticated()`).
     ///
-    /// **Mandatory for authenticated endpoints:** operations configured with `require_auth(...)`
+    /// **Mandatory for authenticated endpoints:** operations configured with `authenticated()`
     /// must call `require_license_features(...)` before `register()`, because `register()` is only
     /// available once the license requirement state has transitioned to `LicenseSet`.
     ///
@@ -855,6 +845,25 @@ where
             _license_state: PhantomData,
         }
     }
+
+    /// Explicitly declare that this operation does not require any license.
+    ///
+    /// Use this for system/infrastructure endpoints that need authentication
+    /// but are not gated behind application-level license features.
+    ///
+    /// This transitions from `LicenseNotSet` to `LicenseSet` without
+    /// attaching any license requirement.
+    pub fn no_license_required(self) -> OperationBuilder<H, R, S, AuthSet, LicenseSet> {
+        OperationBuilder {
+            spec: self.spec,
+            method_router: self.method_router,
+            _has_handler: self._has_handler,
+            _has_response: self._has_response,
+            _state: self._state,
+            _auth_state: self._auth_state,
+            _license_state: PhantomData,
+        }
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -865,50 +874,23 @@ where
     H: HandlerSlot<S>,
     L: LicenseState,
 {
-    /// Require authentication with a specific resource:action permission.
+    /// Mark this route as requiring authentication.
     ///
-    /// This only sets per-route security metadata (`resource` + allowed `action`).
-    /// Runtime enforcement is performed by middleware when it is configured.
+    /// This is a binary marker — the route requires a valid bearer token.
+    /// Scope enforcement (which scopes are needed) is configured at the
+    /// gateway level, not per-route.
     ///
     /// This method transitions from `AuthNotSet` to `AuthSet` state.
     ///
     /// # Example
     /// ```rust
-    /// # use modkit::api::operation_builder::{OperationBuilder, AuthReqResource, AuthReqAction, LicenseFeature};
+    /// # use modkit::api::operation_builder::{OperationBuilder, LicenseFeature};
     /// # use axum::{extract::Json, Router };
     /// # use serde::{Serialize};
     /// #
     /// # #[derive(Serialize)]
     /// # pub struct User;
     /// #
-    /// enum Resource {
-    ///     Users,
-    /// }
-    ///
-    /// impl AsRef<str> for Resource {
-    ///     fn as_ref(&self) -> &'static str {
-    ///       match self {
-    ///         Resource::Users => "users",
-    ///       }
-    ///    }
-    /// }
-    ///
-    /// impl AuthReqResource for Resource {}
-    ///
-    /// enum Action {
-    ///     Read,
-    /// }
-    ///
-    /// impl AsRef<str> for Action {
-    ///    fn as_ref(&self) -> &'static str {
-    ///      match self {
-    ///         Action::Read => "read",
-    ///      }
-    ///    }
-    /// }
-    ///
-    /// impl AuthReqAction for Action {}
-    ///
     /// enum License {
     ///     Base,
     /// }
@@ -929,7 +911,7 @@ where
     /// #   api: &dyn modkit::api::OpenApiRegistry,
     /// # ) -> anyhow::Result<axum::Router> {
     /// let router = OperationBuilder::get("/users-info/v1/users")
-    ///     .require_auth(&Resource::Users, &Action::Read)
+    ///     .authenticated()
     ///     .require_license_features::<License>([])
     ///     .handler(list_users_handler)
     ///     .json_response(axum::http::StatusCode::OK, "List of users")
@@ -941,15 +923,8 @@ where
     /// #   unimplemented!()
     /// # }
     /// ```
-    pub fn require_auth(
-        mut self,
-        resource: &impl AuthReqResource,
-        action: &impl AuthReqAction,
-    ) -> OperationBuilder<H, R, S, AuthSet, L> {
-        self.spec.sec_requirement = Some(OperationSecRequirement {
-            resource: resource.as_ref().into(),
-            action: action.as_ref().into(),
-        });
+    pub fn authenticated(mut self) -> OperationBuilder<H, R, S, AuthSet, L> {
+        self.spec.authenticated = true;
         self.spec.is_public = false;
         OperationBuilder {
             spec: self.spec,
@@ -987,7 +962,7 @@ where
     /// ```
     pub fn public(mut self) -> OperationBuilder<H, R, S, AuthSet, LicenseSet> {
         self.spec.is_public = true;
-        self.spec.sec_requirement = None;
+        self.spec.authenticated = false;
         OperationBuilder {
             spec: self.spec,
             method_router: self.method_router,
@@ -1566,7 +1541,7 @@ where
     /// This method is only available when:
     /// - Handler is present
     /// - Response is present
-    /// - Auth requirement is set (either `require_auth` or `public`)
+    /// - Auth requirement is set (either `authenticated` or `public`)
     ///
     /// All conditions are enforced at compile time by the type system.
     pub fn register(self, router: Router<S>, openapi: &dyn OpenApiRegistry) -> Router<S> {
@@ -1840,53 +1815,21 @@ mod tests {
         }
     }
 
-    enum TestResource {
-        Users,
-    }
-
-    enum TestAction {
-        Read,
-    }
-
-    impl AsRef<str> for TestResource {
-        fn as_ref(&self) -> &'static str {
-            match self {
-                TestResource::Users => "users",
-            }
-        }
-    }
-
-    impl AuthReqResource for TestResource {}
-
-    impl AsRef<str> for TestAction {
-        fn as_ref(&self) -> &'static str {
-            match self {
-                TestAction::Read => "read",
-            }
-        }
-    }
-
-    impl AuthReqAction for TestAction {}
-
     #[test]
-    fn require_auth() {
+    fn authenticated() {
         let builder = OperationBuilder::<Missing, Missing, ()>::get("/tests/v1/test")
-            .require_auth(&TestResource::Users, &TestAction::Read)
+            .authenticated()
             .handler(test_handler)
             .json_response(http::StatusCode::OK, "Success");
 
-        let sec_requirement = builder
-            .spec
-            .sec_requirement
-            .expect("Should have security requirement");
-        assert_eq!(sec_requirement.resource, "users");
-        assert_eq!(sec_requirement.action, "read");
+        assert!(builder.spec.authenticated);
+        assert!(!builder.spec.is_public);
     }
 
     #[test]
     fn require_license_features_none() {
         let builder = OperationBuilder::<Missing, Missing, ()>::get("/tests/v1/test")
-            .require_auth(&TestResource::Users, &TestAction::Read)
+            .authenticated()
             .require_license_features::<TestLicenseFeatures>([])
             .handler(|| async {})
             .json_response(http::StatusCode::OK, "OK");
@@ -1895,11 +1838,23 @@ mod tests {
     }
 
     #[test]
+    fn no_license_required_transitions_and_allows_register() {
+        let builder = OperationBuilder::<Missing, Missing, ()>::get("/tests/v1/test")
+            .authenticated()
+            .no_license_required()
+            .handler(|| async {})
+            .json_response(http::StatusCode::OK, "OK");
+
+        assert!(builder.spec.license_requirement.is_none());
+        assert!(!builder.spec.is_public);
+    }
+
+    #[test]
     fn require_license_features_one() {
         let feature = TestLicenseFeatures::FeatureA;
 
         let builder = OperationBuilder::<Missing, Missing, ()>::get("/tests/v1/test")
-            .require_auth(&TestResource::Users, &TestAction::Read)
+            .authenticated()
             .require_license_features([&feature])
             .handler(|| async {})
             .json_response(http::StatusCode::OK, "OK");
@@ -1918,7 +1873,7 @@ mod tests {
         let feature_b = TestLicenseFeatures::FeatureB;
 
         let builder = OperationBuilder::<Missing, Missing, ()>::get("/tests/v1/test")
-            .require_auth(&TestResource::Users, &TestAction::Read)
+            .authenticated()
             .require_license_features([&feature_a, &feature_b])
             .handler(|| async {})
             .json_response(http::StatusCode::OK, "OK");

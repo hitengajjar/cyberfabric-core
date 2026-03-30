@@ -1,8 +1,87 @@
-# Feature Specification Expert Checklist
+# FEATURE Expert Checklist
 
-**Artifact**: Feature Specification (FEATURE)  
-**Version**: 1.0  
-**Purpose**: Comprehensive quality checklist for feature specifications
+**Artifact**: Feature (FEATURE)
+**Version**: 2.0
+**Last Updated**: 2026-02-03
+**Purpose**: Comprehensive quality checklist for FEATURE artifacts
+
+## Table of Contents
+
+1. [Referenced Standards](#referenced-standards)
+2. [Review Scope Selection](#review-scope-selection)
+3. [Prerequisites](#prerequisites)
+4. [Applicability Context](#applicability-context)
+5. [Severity Dictionary](#severity-dictionary)
+6. [MUST HAVE](#must-have)
+   - [🏗️ ARCHITECTURE Expertise (ARCH)](#architecture-expertise-arch)
+   - [Semantic Alignment (SEM)](#semantic-alignment-sem)
+   - [⚡ PERFORMANCE Expertise (PERF)](#performance-expertise-perf)
+   - [🔒 SECURITY Expertise (SEC)](#security-expertise-sec)
+   - [🛡️ RELIABILITY Expertise (REL)](#reliability-expertise-rel)
+   - [📊 DATA Expertise (DATA)](#data-expertise-data)
+   - [🔌 INTEGRATION Expertise (INT)](#integration-expertise-int)
+   - [🖥️ OPERATIONS Expertise (OPS)](#operations-expertise-ops)
+   - [🔧 MAINTAINABILITY Expertise (MAINT)](#maintainability-expertise-maint)
+   - [🧪 TESTING Expertise (TEST)](#testing-expertise-test)
+   - [📜 COMPLIANCE Expertise (COMPL)](#compliance-expertise-compl)
+   - [👤 USABILITY Expertise (UX)](#usability-expertise-ux)
+   - [🏢 BUSINESS Expertise (BIZ)](#business-expertise-biz)
+   - [DOC (DOC)](#doc-doc)
+7. [MUST NOT HAVE](#must-not-have)
+8. [Validation Summary](#validation-summary)
+   - [Final Checklist](#final-checklist)
+   - [Reporting Readiness Checklist](#reporting-readiness-checklist)
+   - [Reporting](#reporting)
+   - [Reporting Commitment](#reporting-commitment)
+
+---
+
+## Referenced Standards
+
+This checklist validates FEATURE artifacts based on the following international standards:
+
+| Standard | Domain | Description |
+|----------|--------|-------------|
+| [IEEE 1016-2009](https://standards.ieee.org/ieee/1016/4502/) | **Design Description** | Software Design Descriptions — detailed design viewpoint, design entities |
+| [ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html) | **Requirements Notation** | Requirements engineering — behavioral requirements, shall notation, traceability |
+| [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) | **Quality Model** | SQuaRE — 8 quality characteristics: performance, security, reliability, maintainability |
+| [ISO/IEC/IEEE 29119-3:2021](https://www.iso.org/standard/79429.html) | **Test Documentation** | Software testing — test specification, acceptance criteria |
+| [OWASP ASVS 5.0](https://owasp.org/www-project-application-security-verification-standard/) | **Security Verification** | Application security requirements — authentication, authorization, input validation |
+| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | **Accessibility** | Web Content Accessibility Guidelines — POUR principles, Level AA |
+---
+
+## Review Scope Selection
+
+**Choose review mode based on feature complexity and risk**:
+
+| Review Mode | When to Use | Domains to Check |
+|-------------|-------------|------------------|
+| **Quick** | Simple CRUD, minor updates | ARCH (core) + BIZ + changed domains |
+| **Standard** | New feature, moderate complexity | All applicable domains |
+| **Full** | Security-sensitive, complex logic | All 12 domains with evidence |
+
+### Quick Review (Core Items Only)
+
+**MUST CHECK** (blocking):
+- [ ] ARCH-FDESIGN-001: Feature Context Completeness
+- [ ] ARCH-FDESIGN-003: Actor Flow Completeness
+- [ ] BIZ-FDESIGN-001: Requirements Alignment
+- [ ] DOC-FDESIGN-001: Explicit Non-Applicability
+
+**Changed sections** — also check relevant domain items for any sections modified.
+
+### Domain Prioritization by Feature Type
+
+| Feature Type | Priority Domains (check first) | Secondary Domains | Often N/A |
+|--------------|-------------------------------|-------------------|-----------|
+| **User-facing UI** | ARCH, UX, SEC, TEST | PERF, REL, DATA | OPS, INT, COMPL |
+| **Backend API** | ARCH, SEC, DATA, INT | PERF, REL, TEST | UX, COMPL |
+| **Data Processing** | ARCH, DATA, PERF, REL | INT, TEST | SEC, UX, OPS, COMPL |
+| **CLI Command** | ARCH, MAINT, TEST | DATA, INT | SEC, PERF, UX, OPS, COMPL |
+| **Integration/Webhook** | ARCH, INT, SEC, REL | DATA, TEST | UX, PERF, OPS, COMPL |
+| **Auth/Security** | SEC, ARCH, DATA, REL | TEST, COMPL | UX, PERF, OPS, INT |
+
+**Applicability Rule**: Domains in "Often N/A" column still require explicit "Not applicable because..." statement in document if skipped.
 
 ---
 
@@ -24,7 +103,7 @@ Before starting the review, confirm:
 
 Before evaluating each checklist item, the expert MUST:
 
-1. **Understand the feature's domain** — What kind of feature is this? (e.g., user-facing UI feature, backend API, data processing pipeline, CLI command)
+1. **Understand the feature's domain** — What kind of feature is this? (e.g., user-facing UI feature, backend API feature, data processing pipeline, CLI command)
 
 2. **Determine applicability for each requirement** — Not all checklist items apply to all features:
    - A simple CRUD feature may not need complex State Management analysis
@@ -60,9 +139,16 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🏗️ ARCHITECTURE Expertise (ARCH)
 
+> **Standard**: [IEEE 1016-2009](https://standards.ieee.org/ieee/1016/4502/) — Software Design Descriptions
+>
+> Design entities require: identification, type, purpose, function, subordinates, dependencies, resources, processing, data (§5.4)
+
 ### ARCH-FDESIGN-001: Feature Context Completeness
 **Severity**: CRITICAL
+**Ref**: IEEE 1016-2009 §5.4.1 (Design entity attributes)
 
+- [ ] `featstatus` ID defined under H1 title in checkbox form (`- [ ] \`pN\` - **ID**: \`cpt-{system}-featstatus-{slug}\``)
+- [ ] `feature` reference present under H1 title in checkbox form (`- [x] \`pN\` - \`cpt-{system}-feature-{slug}\``) — backreference to DECOMPOSITION entry
 - [ ] Feature identifier is present and stable (unique within the project)
 - [ ] Feature status documented
 - [ ] Overall Design reference present
@@ -136,10 +222,65 @@ Before evaluating each checklist item, the expert MUST:
 
 ---
 
+## Semantic Alignment (SEM)
+
+> **Standard**: [ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html) — Requirements Engineering
+>
+> "Each requirement shall be traceable bidirectionally... uniquely identified" (§5.2.8, §6.5)
+
+### SEM-FDESIGN-001: PRD Coverage Integrity
+**Severity**: CRITICAL
+**Ref**: ISO/IEC/IEEE 29148:2018 §6.5 (Traceability)
+
+- [ ] All referenced PRD FR/NFR IDs are valid and correctly cited
+- [ ] Feature requirements do not contradict PRD scope, priorities, or constraints
+- [ ] Feature outcomes preserve PRD intent and success criteria
+- [ ] Any PRD trade-offs are explicitly documented and approved
+
+### SEM-FDESIGN-002: Design Principles and Constraints
+**Severity**: CRITICAL
+
+- [ ] Feature design adheres to design principles referenced in the Overall Design
+- [ ] Feature design respects all design constraints and does not bypass them
+- [ ] Any constraint exception is explicitly documented with rationale
+
+### SEM-FDESIGN-003: Architecture and Component Consistency
+**Severity**: HIGH
+
+- [ ] Feature responsibilities align with component boundaries in the Overall Design
+- [ ] Interactions and sequences match the system interaction design
+- [ ] Data models and entities conform to the Overall Design domain model
+- [ ] API contracts and integration boundaries match the Overall Design
+
+### SEM-FDESIGN-004: Feature Semantics Completeness
+**Severity**: HIGH
+
+- [ ] Actor flows, algorithms, and state machines are consistent with the design context
+- [ ] Definition of Done mappings cover required design references (principles, constraints, components, sequences, tables)
+- [ ] Any semantic deviation from design is documented and approved
+
+### SEM-FDESIGN-005: Design Decomposition Consistency
+**Severity**: HIGH
+
+- [ ] Feature `feature` reference under H1 matches the DECOMPOSITION entry ID
+- [ ] Purpose, scope, and out-of-scope items align with the DECOMPOSITION entry
+- [ ] Dependencies in the feature design match the DECOMPOSITION dependency list
+- [ ] Requirements covered (FR/NFR) match the DECOMPOSITION mapping
+- [ ] Design principles and constraints covered match the DECOMPOSITION mapping
+- [ ] Domain entities, components, APIs, sequences, and data tables match the DECOMPOSITION entry
+- [ ] `featstatus` checkbox state is consistent with flow/algo/state/dod checkbox states
+
+---
+
 ## ⚡ PERFORMANCE Expertise (PERF)
+
+> **Standard**: [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) — Performance Efficiency
+>
+> Sub-characteristics: time behavior, resource utilization, capacity under defined conditions
 
 ### PERF-FDESIGN-001: Performance-Critical Paths
 **Severity**: HIGH
+**Ref**: ISO/IEC 25010:2011 §4.2.2 (Performance efficiency)
 
 - [ ] Hot paths identified
 - [ ] Latency-sensitive operations marked
@@ -181,8 +322,13 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🔒 SECURITY Expertise (SEC)
 
+> **Standards**:
+> - [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) — Security: confidentiality, integrity, non-repudiation, accountability, authenticity
+> - [OWASP ASVS 5.0](https://owasp.org/www-project-application-security-verification-standard/) — Application Security Verification Standard
+
 ### SEC-FDESIGN-001: Authentication Integration
 **Severity**: CRITICAL
+**Ref**: OWASP ASVS V2 (Authentication), ISO 25010 §4.2.6 (Authenticity)
 
 - [ ] Authentication requirements documented
 - [ ] Session handling documented
@@ -203,6 +349,7 @@ Before evaluating each checklist item, the expert MUST:
 
 ### SEC-FDESIGN-003: Input Validation
 **Severity**: CRITICAL
+**Ref**: OWASP ASVS V5 (Validation, Sanitization), ISO 25010 §4.2.6 (Integrity)
 
 - [ ] All inputs validated
 - [ ] Validation rules documented
@@ -245,8 +392,13 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🛡️ RELIABILITY Expertise (REL)
 
+> **Standard**: [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) — Reliability
+>
+> Sub-characteristics: maturity, availability, fault tolerance, recoverability
+
 ### REL-FDESIGN-001: Error Handling Completeness
 **Severity**: CRITICAL
+**Ref**: ISO/IEC 25010:2011 §4.2.5 (Fault tolerance, Recoverability)
 
 - [ ] All error conditions identified
 - [ ] Error classification documented
@@ -267,6 +419,7 @@ Before evaluating each checklist item, the expert MUST:
 
 ### REL-FDESIGN-003: Data Integrity
 **Severity**: CRITICAL
+**Ref**: ISO/IEC 25010:2011 §4.2.6.2 (Integrity)
 
 - [ ] Transaction boundaries documented
 - [ ] Consistency guarantees documented
@@ -445,8 +598,13 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🔧 MAINTAINABILITY Expertise (MAINT)
 
+> **Standard**: [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) — Maintainability
+>
+> Sub-characteristics: modularity, reusability, analysability, modifiability, testability
+
 ### MAINT-FDESIGN-001: Code Organization
 **Severity**: MEDIUM
+**Ref**: ISO/IEC 25010:2011 §4.2.7 (Modularity, Modifiability)
 
 - [ ] Module structure implied
 - [ ] Separation of concerns evident
@@ -477,8 +635,13 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🧪 TESTING Expertise (TEST)
 
+> **Standards**:
+> - [ISO/IEC/IEEE 29119-3:2021](https://www.iso.org/standard/79429.html) — Test documentation templates
+> - [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) §4.2.7.5 — Testability sub-characteristic
+
 ### TEST-FDESIGN-001: Testability
 **Severity**: HIGH
+**Ref**: ISO/IEC 25010:2011 §4.2.7.5 (Testability), ISO/IEC/IEEE 29119-3:2021
 
 - [ ] Flows are testable (deterministic, observable)
 - [ ] Algorithms are testable (clear inputs/outputs)
@@ -535,8 +698,13 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 👤 USABILITY Expertise (UX)
 
+> **Standards**:
+> - [ISO/IEC 25010:2011](https://www.iso.org/standard/35733.html) — Usability: learnability, operability, user error protection, accessibility
+> - [WCAG 2.2](https://www.w3.org/TR/WCAG22/) — Web Content Accessibility Guidelines (Level AA)
+
 ### UX-FDESIGN-001: User Experience Flows
 **Severity**: MEDIUM
+**Ref**: ISO/IEC 25010:2011 §4.2.4 (Usability)
 
 - [ ] User journey clear
 - [ ] Feedback points documented
@@ -547,6 +715,7 @@ Before evaluating each checklist item, the expert MUST:
 
 ### UX-FDESIGN-002: Accessibility
 **Severity**: MEDIUM (if applicable)
+**Ref**: [WCAG 2.2](https://www.w3.org/TR/WCAG22/) Level AA, ISO/IEC 25010:2011 §4.2.4.6 (Accessibility)
 
 - [ ] Accessibility requirements addressed
 - [ ] Keyboard navigation supported
@@ -558,10 +727,15 @@ Before evaluating each checklist item, the expert MUST:
 
 ## 🏢 BUSINESS Expertise (BIZ)
 
+> **Standard**: [ISO/IEC/IEEE 29148:2018](https://www.iso.org/standard/72089.html) — Requirements Engineering
+>
+> "Requirements shall be necessary, implementation-free, unambiguous, consistent, complete, singular, feasible, traceable, verifiable" (§5.2)
+
 ### BIZ-FDESIGN-001: Requirements Alignment
 **Severity**: CRITICAL
+**Ref**: ISO/IEC/IEEE 29148:2018 §5.2 (Characteristics of requirements)
 
-- [ ] All feature requirements (Section E) documented
+- [ ] All feature requirements (Definitions of Done) documented
 - [ ] Requirements trace to PRD
 - [ ] Requirements trace to a roadmap/backlog item (if used)
 - [ ] Business rules accurately captured
@@ -579,7 +753,7 @@ Before evaluating each checklist item, the expert MUST:
 
 ---
 
-## Deliberate Omissions
+## Deliberate Omissions (DOC)
 
 ### DOC-FDESIGN-001: Explicit Non-Applicability
 **Severity**: CRITICAL
@@ -592,9 +766,7 @@ Before evaluating each checklist item, the expert MUST:
 
 # MUST NOT HAVE
 
----
-
-## ❌ ARCH-FDESIGN-NO-001: No System-Level Type Redefinitions
+### ARCH-FDESIGN-NO-001: No System-Level Type Redefinitions
 **Severity**: CRITICAL
 
 **What to check**:
@@ -606,9 +778,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: Central domain model / schema documentation
 
----
-
-## ❌ ARCH-FDESIGN-NO-002: No New API Endpoints
+### ARCH-FDESIGN-NO-002: No New API Endpoints
 **Severity**: CRITICAL
 
 **What to check**:
@@ -620,9 +790,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: API contract documentation (e.g., OpenAPI)
 
----
-
-## ❌ ARCH-FDESIGN-NO-003: No Architectural Decisions
+### ARCH-FDESIGN-NO-003: No Architectural Decisions
 **Severity**: HIGH
 
 **What to check**:
@@ -634,9 +802,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: `ADR`
 
----
-
-## ❌ BIZ-FDESIGN-NO-001: No Product Requirements
+### BIZ-FDESIGN-NO-001: No Product Requirements
 **Severity**: HIGH
 
 **What to check**:
@@ -648,9 +814,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: `PRD`
 
----
-
-## ❌ BIZ-FDESIGN-NO-002: No Sprint/Task Breakdowns
+### BIZ-FDESIGN-NO-002: No Sprint/Task Breakdowns
 **Severity**: HIGH
 
 **What to check**:
@@ -663,9 +827,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: Project management tools
 
----
-
-## ❌ MAINT-FDESIGN-NO-001: No Code Snippets
+### MAINT-FDESIGN-NO-001: No Code Snippets
 **Severity**: HIGH
 
 **What to check**:
@@ -678,9 +840,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: Source code repository
 
----
-
-## ❌ TEST-FDESIGN-NO-001: No Test Implementation
+### TEST-FDESIGN-NO-001: No Test Implementation
 **Severity**: MEDIUM
 
 **What to check**:
@@ -692,9 +852,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: Test directories in source code
 
----
-
-## ❌ SEC-FDESIGN-NO-001: No Security Secrets
+### SEC-FDESIGN-NO-001: No Security Secrets
 **Severity**: CRITICAL
 
 **What to check**:
@@ -707,9 +865,7 @@ Before evaluating each checklist item, the expert MUST:
 
 **Where it belongs**: Secret management system
 
----
-
-## ❌ OPS-FDESIGN-NO-001: No Infrastructure Code
+### OPS-FDESIGN-NO-001: No Infrastructure Code
 **Severity**: MEDIUM
 
 **What to check**:
@@ -737,7 +893,7 @@ Confirm before reporting results:
 
 ### Explicit Handling Verification
 
-For each major checklist category (ARCH, PERF, SEC, REL, DATA, INT, OPS, MAINT, TEST, COMPL, UX, BIZ), confirm:
+For each major checklist category (ARCH, SEM, PERF, SEC, REL, DATA, INT, OPS, MAINT, TEST, COMPL, UX, BIZ, DOC), confirm:
 
 - [ ] Category is addressed in the document, OR
 - [ ] Category is explicitly marked "Not applicable" with reasoning in the document, OR
@@ -772,7 +928,7 @@ For each issue include:
 - **Why it matters**: Impact (risk, cost, user harm, compliance)
 - **Proposal**: Concrete fix (what to change/add/remove) with clear acceptance criteria
 
-Recommended output format for chat:
+### Full Report Format (Standard/Full Reviews)
 
 ```markdown
 ## Review Report (Issues Only)
@@ -806,22 +962,23 @@ Recommended output format for chat:
 ---
 
 ### 2. {Short issue title}
-
-**Checklist Item**: `{CHECKLIST-ID}` — {Checklist item title}
-
-**Severity**: CRITICAL|HIGH|MEDIUM|LOW
-
-#### Why Applicable
-
-{...}
-
-#### Issue
-
-{...}
-
----
-
 ...
+```
+
+### Compact Report Format (Quick Reviews)
+
+For quick reviews, use this condensed table format:
+
+```markdown
+## FEATURE Review Summary
+
+| ID | Severity | Issue | Proposal |
+|----|----------|-------|----------|
+| ARCH-FDESIGN-001 | HIGH | Missing feature scope | Add scope statement to Section A |
+| BIZ-FDESIGN-001 | MEDIUM | No PRD traceability | Add requirement references |
+
+**Applicability**: {Feature type} — checked {N} priority domains, {M} marked N/A
+
 ```
 
 ---

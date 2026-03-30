@@ -139,9 +139,31 @@ async fn stop_child_with_grace(
 }
 
 /// Wait for a log forwarder task to finish with timeout.
-async fn wait_forwarder(handle: Option<JoinHandle<()>>) {
-    if let Some(h) = handle {
-        let _ = tokio::time::timeout(FORWARDER_DRAIN_TIMEOUT, h).await;
+async fn wait_forwarder(
+    handle: Option<JoinHandle<()>>,
+    module: &str,
+    instance_id: uuid::Uuid,
+    stream: &str,
+) {
+    let Some(h) = handle else { return };
+    match tokio::time::timeout(FORWARDER_DRAIN_TIMEOUT, h).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            if e.is_panic() {
+                tracing::warn!(module, %instance_id, stream, error = %e, "log forwarder task panicked");
+            } else {
+                tracing::warn!(module, %instance_id, stream, error = %e, "log forwarder task cancelled");
+            }
+        }
+        Err(_) => {
+            tracing::warn!(
+                module,
+                %instance_id,
+                stream,
+                timeout_ms = FORWARDER_DRAIN_TIMEOUT.as_millis(),
+                "log forwarder did not finish within drain timeout",
+            );
+        }
     }
 }
 
@@ -217,8 +239,20 @@ impl LocalProcessBackend {
 
         // Wait for forwarders to drain
         for inst in all_instances {
-            wait_forwarder(inst.stdout_forwarder).await;
-            wait_forwarder(inst.stderr_forwarder).await;
+            wait_forwarder(
+                inst.stdout_forwarder,
+                &inst.handle.module,
+                inst.handle.instance_id,
+                "stdout",
+            )
+            .await;
+            wait_forwarder(
+                inst.stderr_forwarder,
+                &inst.handle.module,
+                inst.handle.instance_id,
+                "stderr",
+            )
+            .await;
         }
 
         tracing::info!("All OoP module processes stopped");
@@ -545,10 +579,9 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_send_terminate_signal_to_valid_process() {
-            // Spawn a long-running process using sh -c 'sleep 30'
-            // This works on all Unix systems (Linux, macOS, BSD)
-            let mut cmd = tokio::process::Command::new("/bin/sh");
-            cmd.args(["-c", "sleep 30"]);
+            // Spawn a long-running process
+            let mut cmd = tokio::process::Command::new("sleep");
+            cmd.args(["30"]);
 
             let mut child = cmd.spawn().expect("should spawn test process");
 
@@ -559,7 +592,7 @@ mod tests {
             assert!(result, "Should successfully send SIGTERM to valid process");
 
             // Wait briefly for graceful shutdown
-            tokio::time::timeout(Duration::from_millis(100), child.wait())
+            tokio::time::timeout(Duration::from_secs(1), child.wait())
                 .await
                 .expect("process should exit within timeout")
                 .expect("wait should succeed");

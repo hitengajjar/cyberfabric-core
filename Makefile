@@ -1,10 +1,11 @@
 CI := 1
 
-OPENAPI_URL ?= http://127.0.0.1:8087/openapi.json
+OPENAPI_URL ?= http://127.0.0.1:8087/cf/openapi.json
 OPENAPI_OUT ?= docs/api/api.json
 
-# E2E Docker args
-E2E_ARGS ?= --features users-info-example
+# E2E feature set (single source of truth: config/e2e-features.txt)
+E2E_FEATURES ?= $(strip $(shell cat config/e2e-features.txt 2>/dev/null))
+E2E_ARGS ?= $(if $(E2E_FEATURES),--features $(E2E_FEATURES),)
 
 # -------- Utility macros --------
 
@@ -25,11 +26,14 @@ help:
 
 
 # -------- Set up --------
+# Note: .setup-stamp should be added to .gitignore
 
 .PHONY: setup
 
 ## Install all required development tools
-setup:
+setup: .setup-stamp
+
+.setup-stamp:
 	@echo "Installing required development tools..."
 	rustup component add clippy
 	cargo install lychee
@@ -47,6 +51,7 @@ setup:
 		cargo install cargo-llvm-cov; \
 	fi
 	@echo "Setup complete. All tools installed."
+	@touch .setup-stamp
 
 # -------- Code formatting --------
 
@@ -54,7 +59,16 @@ setup:
 
 # Check code formatting
 fmt:
+	$(call check_rustup_component,rustfmt)
 	cargo fmt --all -- --check
+
+# -------- Module naming validation --------
+
+.PHONY: validate-module-names
+
+## Validate module folder names follow kebab-case convention
+validate-module-names:
+	@python3 scripts/validate_module_names.py
 
 # -------- Code safety checks --------
 #
@@ -99,12 +113,16 @@ fmt:
 # |             | - Use 'make dylint-list' to see all available custom lints           |
 # +-------------+----------------------------------------------------------------------+
 
-.PHONY: clippy lychee kani geiger safety lint dylint dylint-list dylint-test gts-docs gts-docs-vendor gts-docs-release gts-docs-vendor-release gts-docs-test
+.PHONY: clippy lychee kani geiger safety lint dylint dylint-list dylint-test gts-docs gts-docs-vendor gts-docs-release gts-docs-vendor-release gts-docs-test cypilot-validate
 
 # Run clippy linter (excludes gts-rust submodule which has its own lint settings)
 clippy:
 	$(call check_rustup_component,clippy)
 	cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::perf
+
+# Validate cypilot artifacts (specs, code, templates)
+cypilot-validate:
+	@python3 .cypilot/.core/skills/cypilot/scripts/cypilot.py validate && echo "OK. cypilot validation PASSED" || (echo "ERROR: cypilot validation FAILED"; exit 1)
 
 # Run markdown checks with 'lychee'
 lychee:
@@ -128,10 +146,14 @@ lint:
 ## Validate GTS identifiers in .md and .json files (DE0903)
 # Uses gts-docs-validator from apps/gts-docs-validator
 # Vendor enforcement is available via the gts-docs-vendor target (--vendor x)
+
+# REDUCING THE SCOPE OF THE VALIDATION UNTIL IT IS STABLE
 gts-docs:
 	cargo run -p gts-docs-validator -- \
 		--exclude "target/*" \
 		--exclude "docs/api/*" \
+		--exclude "modules/chat-engine/*" \
+		--exclude "**/helm/*/templates/*" \
 		docs modules libs examples
 
 ## Validate GTS docs with vendor check (ensures all IDs use vendor "x")
@@ -140,6 +162,8 @@ gts-docs-vendor:
 		--vendor x \
 		--exclude "target/*" \
 		--exclude "docs/api/*" \
+		--exclude "modules/chat-engine/*" \
+		--exclude "**/helm/*/templates/*" \
 		docs modules libs examples
 
 ## Validate GTS identifiers (release build)
@@ -147,6 +171,8 @@ gts-docs-release:
 	cargo run --release -p gts-docs-validator -- \
 		--exclude "target/*" \
 		--exclude "docs/api/*" \
+		--exclude "modules/chat-engine/*" \
+		--exclude "**/helm/*/templates/*" \
 		docs modules libs examples
 
 ## Validate GTS docs with vendor check (release build)
@@ -155,6 +181,8 @@ gts-docs-vendor-release:
 		--vendor x \
 		--exclude "target/*" \
 		--exclude "docs/api/*" \
+		--exclude "modules/chat-engine/*" \
+		--exclude "*/helm/*/templates/*" \
 		docs modules libs examples
 
 ## Run tests for GTS documentation validator
@@ -182,31 +210,7 @@ dylint-test:
 dylint:
 	$(call check_tool,cargo-dylint)
 	$(call check_tool,dylint-link)
-	@cd dylint_lints && cargo build --release
-	@TOOLCHAIN=$$(rustc --version --verbose | grep 'host:' | cut -d' ' -f2); \
-	RUSTUP_TOOLCHAIN=$$(cat dylint_lints/rust-toolchain.toml 2>/dev/null | grep 'channel' | cut -d'"' -f2 || echo "nightly"); \
-	cd dylint_lints/target/release && \
-	for lib in $$(ls libde*.dylib libde*.so de*.dll 2>/dev/null | grep -v '@'); do \
-		case "$$lib" in \
-			*.dylib) EXT=".dylib" ;; \
-			*.so) EXT=".so" ;; \
-			*.dll) EXT=".dll" ;; \
-		esac; \
-		BASE=$${lib%$$EXT}; \
-		TARGET="$$BASE@$$RUSTUP_TOOLCHAIN-$$TOOLCHAIN$$EXT"; \
-		cp -f "$$lib" "$$TARGET" 2>/dev/null || true; \
-	done; \
-	cd ../../.. && \
-	DYLINT_LIBS=$$(find dylint_lints/target/release -maxdepth 1 \( -name "libde*@*.so" -o -name "libde*@*.dylib" -o -name "de*@*.dll" \) -type f | sort -u); \
-	if [ -z "$$DYLINT_LIBS" ]; then \
-		echo "ERROR: No dylint libraries found after build."; \
-		exit 1; \
-	fi; \
-	LIB_ARGS=""; \
-	for lib in $$DYLINT_LIBS; do \
-		LIB_ARGS="$$LIB_ARGS --lib-path $$lib"; \
-	done; \
-	cargo +$$RUSTUP_TOOLCHAIN dylint $$LIB_ARGS --workspace
+	cargo +nightly-2025-09-18 dylint --all --workspace
 
 # Run all code safety checks
 safety: clippy kani lint dylint # geiger
@@ -221,9 +225,7 @@ deny:
 	$(call check_tool,cargo-deny)
 	cargo deny check
 
-# Run all security checks
 security: deny
-	@echo "OK. Rust Security Pipeline complete"
 
 # -------- API and docs --------
 
@@ -234,7 +236,7 @@ openapi:
 	@command -v curl >/dev/null || (echo "curl is required to generate OpenAPI spec" && exit 1)
 	@echo "Starting hyperspot-server to generate OpenAPI spec..."
 	# Run server in background
-	cargo run --bin hyperspot-server --features users-info-example -- --config config/quickstart.yaml &
+	cargo run --bin hyperspot-server $(E2E_ARGS) -- --config config/quickstart.yaml &
 	@SERVER_PID=$$!; \
 	trap 'kill $$SERVER_PID >/dev/null 2>&1 || true' EXIT; \
 	echo "hyperspot-server PID: $$SERVER_PID"; \
@@ -271,52 +273,123 @@ dev-fmt:
 
 ## Auto-fix clippy warnings
 dev-clippy:
-	cargo clippy --workspace --all-targets --fix --allow-dirty
+	cargo clippy --workspace --all-targets --all-features --fix --allow-dirty
 
 # Auto-fix formatting and clippy warnings
 dev: dev-fmt dev-clippy dev-test
 
 # -------- Tests --------
 
-.PHONY: test test-sqlite test-pg test-mysql test-db test-users-info-pg
+.PHONY: test test-no-macros test-macros test-sqlite test-pg test-mysql test-db test-users-info-pg
 
 # Run all tests
 test:
 	cargo test --workspace
 
+test-no-macros:
+	cargo test --workspace --exclude cf-modkit-macros-tests --exclude cf-modkit-db-macros
+
+test-macros:
+	cargo test -p cf-modkit-db-macros
+	cargo test -p cf-modkit-macros-tests
+
 ## Run SQLite integration tests
 test-sqlite:
-	cargo test -p modkit-db --features "sqlite,integration" -- --nocapture
+	cargo test -p cf-modkit-db --features sqlite,integration,preview-outbox
+	cargo build -p cf-modkit-db --examples --features sqlite,preview-outbox
 
 ## Run PostgreSQL integration tests
 test-pg:
-	cargo test -p modkit-db --features "pg,integration" -- --nocapture
+	cargo test -p cf-modkit-db --features pg,integration,preview-outbox
 
 ## Run MySQL integration tests
 test-mysql:
-	cargo test -p modkit-db --features "mysql,integration" -- --nocapture
+	cargo test -p cf-modkit-db --features mysql,integration,preview-outbox
 
 # Run all database integration tests
 test-db: test-sqlite test-pg test-mysql
 
-## Run users_info module integration tests
+## Run users-info module integration tests
 test-users-info-pg:
-	cargo test -p users_info --features "integration" -- --nocapture
+	cargo test -p users-info --features "integration" -- --nocapture
+
+# -------- Benchmarks --------
+
+.PHONY: bench-pg bench-pg-profiler bench-mysql bench-mariadb bench-sqlite bench-db \
+       bench-pg-longhaul bench-mysql-longhaul bench-mariadb-longhaul bench-sqlite-longhaul bench-db-longhaul
+
+## Run outbox throughput benchmarks against PostgreSQL
+bench-pg:
+	cargo bench -p cf-modkit-db --features pg,preview-outbox --bench outbox_throughput -- postgres
+
+## Run outbox throughput benchmarks against MySQL
+bench-mysql:
+	cargo bench -p cf-modkit-db --features mysql,preview-outbox --bench outbox_throughput -- mysql
+
+## Run outbox throughput benchmarks against MariaDB
+bench-mariadb:
+	cargo bench -p cf-modkit-db --features mysql,preview-outbox --bench outbox_throughput -- mariadb
+
+## Run outbox throughput benchmarks against SQLite
+bench-sqlite:
+	cargo bench -p cf-modkit-db --features sqlite,preview-outbox --bench outbox_throughput -- sqlite
+
+## Run outbox throughput benchmarks against all database engines
+bench-db: bench-pg bench-mysql bench-mariadb bench-sqlite
+
+## Run long-haul (1M+10M) outbox benchmarks against PostgreSQL
+bench-pg-longhaul:
+	cargo bench -p cf-modkit-db --features pg,preview-outbox --bench outbox_throughput -- postgres_longhaul
+
+## Run long-haul (1M+10M) outbox benchmarks against MySQL
+bench-mysql-longhaul:
+	cargo bench -p cf-modkit-db --features mysql,preview-outbox --bench outbox_throughput -- mysql_longhaul
+
+## Run long-haul (1M+10M) outbox benchmarks against MariaDB
+bench-mariadb-longhaul:
+	cargo bench -p cf-modkit-db --features mysql,preview-outbox --bench outbox_throughput -- mariadb_longhaul
+
+## Run long-haul (100K 1P) outbox benchmarks against SQLite
+bench-sqlite-longhaul:
+	cargo bench -p cf-modkit-db --features sqlite,preview-outbox --bench outbox_throughput -- sqlite_longhaul
+
+## Run long-haul outbox benchmarks against all database engines
+bench-db-longhaul: bench-pg-longhaul bench-mysql-longhaul bench-mariadb-longhaul bench-sqlite-longhaul
 
 # -------- E2E tests --------
 
-.PHONY: e2e e2e-local e2e-docker
+.PHONY: e2e e2e-local e2e-local-smoke e2e-mini-chat e2e-docker e2e-docker-smoke
 
 # Run E2E tests in Docker (default)
 e2e: e2e-docker
 
-# Run E2E tests locally
-e2e-local:
-	python3 scripts/ci.py e2e
-
 ## Run E2E tests in Docker environment
 e2e-docker:
-	python3 scripts/ci.py e2e --docker $(E2E_ARGS)
+	python3 scripts/ci.py e2e-docker $(E2E_ARGS)
+
+## Run E2E smoke tests in Docker (only tests marked @pytest.mark.smoke)
+e2e-docker-smoke:
+	python3 scripts/ci.py e2e-docker $(E2E_ARGS) -- -m smoke
+
+# Run E2E tests locally
+e2e-local:
+	python3 scripts/ci.py e2e-local
+
+## Run E2E smoke tests locally (only tests marked @pytest.mark.smoke)
+e2e-local-smoke:
+	python3 scripts/ci.py e2e-local --smoke
+
+MINI_CHAT_FEATURES = mini-chat,static-authn,static-authz,single-tenant,static-credstore
+MINI_CHAT_K8S_FEATURES = $(MINI_CHAT_FEATURES),k8s
+
+MINI_CHAT_IMAGE ?= hyperspot-mini-chat
+MINI_CHAT_TAG   ?= latest
+
+## Run mini-chat E2E tests (separate binary with mini-chat features)
+e2e-mini-chat:
+	cargo build --bin hyperspot-server --features=$(MINI_CHAT_FEATURES)
+	E2E_BINARY=target/debug/hyperspot-server \
+		python3 -m pytest testing/e2e/modules/mini_chat/ --mode offline -vv
 
 # -------- Code coverage --------
 
@@ -334,7 +407,7 @@ coverage-unit:
 
 ## Ensure needed packages and programs installed for local e2e testing
 check-prereq-e2e-local:
-	python scripts/check_local_env.py --mode e2e-local
+	python3 scripts/check_local_env.py --mode e2e-local
 
 # Generate code coverage report (e2e-local tests only)
 coverage-e2e-local: check-prereq-e2e-local
@@ -397,7 +470,7 @@ fuzz-corpus: fuzz-install
 
 # -------- Main targets --------
 
-.PHONY: all check ci build quickstart example
+.PHONY: all check ci build quickstart example mini-chat mini-chat-docker mini-chat-helm mini-chat-helm-template mini-chat-up mini-chat-down mini-chat-port-forward
 
 # Start server with quickstart config
 quickstart:
@@ -406,25 +479,124 @@ quickstart:
 
 ## Run server with example module
 example:
-	cargo run --bin hyperspot-server --features users-info-example,tenant-resolver-example -- --config config/quickstart.yaml run
+	cargo run --bin hyperspot-server $(E2E_ARGS) -- --config config/quickstart.yaml run
+
+# mini-chat targets are for running the mini-chat module locally and in Kubernetes, with options for building Docker images and deploying with Helm.
+## Run server with fips module
+fips:
+	cargo run --bin hyperspot-server --features fips,static-authn,static-authz,single-tenant,static-credstore,otel -- --config config/quickstart.yaml run
+
+## Run server with mini-chat module
+mini-chat:
+	cargo run --bin hyperspot-server --features mini-chat,static-authn,static-authz,single-tenant,static-credstore,otel -- --config config/mini-chat.yaml run
+
+## Build mini-chat Docker image for K8s
+mini-chat-docker:
+	docker build \
+		-f modules/mini-chat/deploy/docker/mini-chat.Dockerfile \
+		--build-arg CARGO_FEATURES="$(MINI_CHAT_K8S_FEATURES)" \
+		-t $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG) .
+
+## Deploy mini-chat Helm chart to local K8s cluster (build + load + install)
+mini-chat-helm: mini-chat-docker
+	@if command -v k3s >/dev/null 2>&1; then \
+		docker save $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG) | sudo k3s ctr images import -; \
+	elif command -v minikube >/dev/null 2>&1; then \
+		minikube image load $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG); \
+	else \
+		echo "ERROR: k3s or minikube required"; exit 1; \
+	fi
+	helm upgrade --install mini-chat modules/mini-chat/deploy/helm/mini-chat/ \
+		--set secrets.azureOpenaiApiKey="$${AZURE_OPENAI_API_KEY}" \
+		--set secrets.azureOpenaiApiHost="$${AZURE_OPENAI_API_HOST}" \
+		--set postgres.host="$${PG_HOST:-postgres.default.svc.cluster.local}" \
+		--set postgres.password="$${PG_PASSWORD}"
+	@# Force pod restart so it picks up the freshly-loaded image
+	kubectl rollout restart deployment/mini-chat
+	kubectl rollout status deployment/mini-chat --timeout=120s
+
+## Render mini-chat Helm templates (dry-run)
+mini-chat-helm-template:
+	helm template mini-chat modules/mini-chat/deploy/helm/mini-chat/
+
+## One-command: ensure minikube is up, deploy latest chart, port-forward
+## Usage: make mini-chat-up
+## If image was rebuilt (make mini-chat-docker), re-run this to pick it up.
+mini-chat-up:
+	@# --- 1. Ensure cluster is running ---
+	@if command -v minikube >/dev/null 2>&1; then \
+		STATUS=$$(minikube status -f '{{.Host}}' 2>/dev/null || true); \
+		if [ "$$STATUS" != "Running" ]; then \
+			echo "Starting minikube..."; \
+			minikube start; \
+		fi; \
+	elif command -v k3s >/dev/null 2>&1; then \
+		: ; \
+	else \
+		echo "ERROR: minikube or k3s required"; exit 1; \
+	fi
+	@# --- 2. Load latest image if it exists locally ---
+	@if docker image inspect $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG) >/dev/null 2>&1; then \
+		echo "Loading image $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG) into cluster..."; \
+		if command -v minikube >/dev/null 2>&1; then \
+			minikube image load $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG); \
+		else \
+			docker save $(MINI_CHAT_IMAGE):$(MINI_CHAT_TAG) | sudo k3s ctr images import -; \
+		fi; \
+	else \
+		echo "No local image found. Run 'make mini-chat-docker' first to build."; \
+		exit 1; \
+	fi
+	@# --- 3. Helm install/upgrade ---
+	@if [ -z "$${AZURE_OPENAI_API_KEY}" ] || [ -z "$${AZURE_OPENAI_API_HOST}" ]; then \
+		echo "WARNING: AZURE_OPENAI_API_KEY or AZURE_OPENAI_API_HOST not set."; \
+		echo "  export AZURE_OPENAI_API_KEY=... AZURE_OPENAI_API_HOST=..."; \
+	fi
+	helm upgrade --install mini-chat modules/mini-chat/deploy/helm/mini-chat/ \
+		--set secrets.azureOpenaiApiKey="$${AZURE_OPENAI_API_KEY}" \
+		--set secrets.azureOpenaiApiHost="$${AZURE_OPENAI_API_HOST}" \
+		--set postgres.host="$${PG_HOST:-postgres.default.svc.cluster.local}" \
+		--set postgres.password="$${PG_PASSWORD}"
+	@# --- 4. Rollout restart to guarantee the latest image is used ---
+	kubectl rollout restart deployment/mini-chat
+	kubectl rollout status deployment/mini-chat --timeout=120s
+	@echo ""
+	@echo "mini-chat is running. In a separate terminal run:"
+	@echo "  make mini-chat-port-forward"
+	@echo "Then access: http://localhost:8087/cf/mini-chat"
+
+## Persistent port-forward with auto-reconnect (run in a separate terminal)
+mini-chat-port-forward:
+	@echo "Port-forward: localhost:8087 -> svc/mini-chat:8087 (auto-reconnect, Ctrl+C to stop)"
+	@while true; do \
+		kubectl port-forward svc/mini-chat 8087:8087 2>&1 || true; \
+		echo "connection lost, reconnecting in 2s..."; \
+		sleep 2; \
+	done
+
+## Tear down mini-chat from the cluster
+mini-chat-down:
+	helm uninstall mini-chat 2>/dev/null || true
+	@echo "mini-chat uninstalled"
 
 oop-example:
 	cargo build -p calculator --features oop_module
-	cargo run --bin hyperspot-server --features oop-example,users-info-example,tenant-resolver-example -- --config config/quickstart.yaml run
+	cargo run --bin hyperspot-server --features oop-example,users-info-example,static-authn,static-authz,static-tenants,static-credstore -- --config config/quickstart.yaml run
 
 # Run all quality checks
-check: fmt clippy lychee security dylint-test dylint gts-docs test
+check: .setup-stamp fmt cypilot-validate clippy lychee security dylint-test dylint gts-docs test
 
 ci_test: fmt clippy
 
 ci_docs: lychee
 
-# Run CI pipeline
-ci: check
+# Run CI pipeline locally, requires docker
+ci: fmt clippy test-no-macros test-macros test-db deny test-users-info-pg lychee dylint dylint-test
 
-# Make a release build using stable toolchain
+# Build the hyperspot-server release binary using the stable toolchain.
+# Feature set is read from config/e2e-features.txt when present.
 build:
-	cargo +stable build --release
+	cargo +stable build --release --bin hyperspot-server $(E2E_ARGS)
 
 # Run all necessary quality checks and tests and then build the release binary
 all: build check test-sqlite e2e-local

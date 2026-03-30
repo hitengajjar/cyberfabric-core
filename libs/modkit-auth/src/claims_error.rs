@@ -36,23 +36,8 @@ pub enum ClaimsError {
     #[error("Invalid claim format: {field} - {reason}")]
     InvalidClaimFormat { field: String, reason: String },
 
-    #[error("No matching plugin found for token")]
-    NoMatchingPlugin,
-
-    #[error("No key provider could validate this token")]
-    NoValidatingKey,
-
-    #[error("No matching key provider")]
-    NoMatchingProvider,
-
     #[error("Unknown key ID after refresh")]
     UnknownKidAfterRefresh,
-
-    #[error("Introspection denied")]
-    IntrospectionDenied,
-
-    #[error("Invalid configuration: {0}")]
-    ConfigError(String),
 
     #[error("JWT decode failed: {0}")]
     DecodeFailed(String),
@@ -84,49 +69,5 @@ impl From<ClaimsError> for crate::errors::AuthError {
             ClaimsError::JwksFetchFailed(msg) => crate::errors::AuthError::JwksFetchFailed(msg),
             other => crate::errors::AuthError::ValidationFailed(other.to_string()),
         }
-    }
-}
-
-#[cfg(feature = "axum-ext")]
-impl axum::response::IntoResponse for ClaimsError {
-    fn into_response(self) -> axum::response::Response {
-        use axum::http::StatusCode;
-        use axum::response::Json;
-        use serde_json::json;
-
-        let (status, message) = match self {
-            // 401 Unauthorized - authentication failures
-            ClaimsError::Expired
-            | ClaimsError::NotYetValid
-            | ClaimsError::InvalidSignature
-            | ClaimsError::InvalidIssuer { .. }
-            | ClaimsError::InvalidAudience { .. }
-            | ClaimsError::Malformed(_)
-            | ClaimsError::MissingClaim(_)
-            | ClaimsError::InvalidClaimFormat { .. }
-            | ClaimsError::NoMatchingPlugin
-            | ClaimsError::NoValidatingKey
-            | ClaimsError::NoMatchingProvider
-            | ClaimsError::UnknownKidAfterRefresh
-            | ClaimsError::DecodeFailed(_)
-            | ClaimsError::UnknownKeyId(_) => (StatusCode::UNAUTHORIZED, self.to_string()),
-
-            // 403 Forbidden - introspection denied
-            ClaimsError::IntrospectionDenied => (StatusCode::FORBIDDEN, self.to_string()),
-
-            // 500 Internal Server Error - system/config errors
-            ClaimsError::ConfigError(_)
-            | ClaimsError::Provider(_)
-            | ClaimsError::JwksFetchFailed(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-            }
-        };
-
-        let body = Json(json!({
-            "error": message,
-            "status": status.as_u16(),
-        }));
-
-        (status, body).into_response()
     }
 }

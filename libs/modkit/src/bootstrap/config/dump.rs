@@ -54,6 +54,13 @@ pub fn render_effective_modules_config(app: &AppConfig) -> Result<serde_json::Va
     use serde_json::json;
 
     let home_dir = PathBuf::from(&app.server.home_dir);
+    // Prevent path traversal attacks by rejecting paths containing '..'
+    if home_dir
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(anyhow::anyhow!("Invalid input: {}", home_dir.display()));
+    }
     let mut modules_config = serde_json::Map::new();
 
     // Iterate over all modules in the configuration
@@ -200,9 +207,7 @@ pub fn redact_dsn_password(dsn: &str) -> Result<String> {
 /// Returns an error if configuration rendering or YAML serialization fails.
 pub fn dump_effective_modules_config_yaml(app: &AppConfig) -> Result<String> {
     let config = render_effective_modules_config(app)?;
-    let yaml = serde_saphyr::to_string(&config)
-        .context("Failed to serialize modules configuration to YAML")?;
-    Ok(yaml)
+    serde_saphyr::to_string(&config).context("Failed to serialize modules configuration to YAML")
 }
 
 /// Dump effective modules configuration as JSON string.
@@ -214,7 +219,6 @@ pub fn dump_effective_modules_config_yaml(app: &AppConfig) -> Result<String> {
 /// Returns an error if configuration rendering or JSON serialization fails.
 pub fn dump_effective_modules_config_json(app: &AppConfig) -> Result<String> {
     let config = render_effective_modules_config(app)?;
-    let json = serde_json::to_string_pretty(&config)
-        .context("Failed to serialize modules configuration to JSON")?;
-    Ok(json)
+    serde_json::to_string_pretty(&config)
+        .context("Failed to serialize modules configuration to JSON")
 }

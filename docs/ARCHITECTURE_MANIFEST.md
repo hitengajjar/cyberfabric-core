@@ -11,7 +11,7 @@ HyperSpot is a modular Rust-based foundation for building SaaS products where Ge
 HyperSpot is a **modular, high-performance AI services platform** built in Rust. It provides a framework for building scalable and highly-customizable AI applications with automatic REST API generation, OpenAPI documentation, and a flexible modular architecture.
 
 **Key Philosophy:**
-- **Modular by Design**: Everything is a Module - composable, independent units with gateway patterns for pluggable workers
+- **Modular by Design**: Everything is a Module - composable, independent units with plugin patterns for pluggable workers
 - **Extensible at Every Level**: [GTS](https://github.com/globaltypesystem/gts-spec)-powered extension points for custom data types, business logic, and third-party integrations
 - **SaaS Ready**: Multi-tenancy, granular access control, usage tracking, and tenant customization built-in
 - **Cloud Operations Excellence**: Production-grade observability, database agnostic design, API best practices, and resilience patterns via ModKit
@@ -93,25 +93,25 @@ A **Module** is a logical component that provides a specific set of functionalit
 - Modules can run either **in-process** (linked into the main binary) or **out-of-process** (as separate binaries communicating via gRPC) — see [MODKIT UNIFIED SYSTEM](modkit_unified_system/README.md) for OoP details
 
 **Example modules:**
-- `file_parser` - Document parsing and extraction
+- `file-parser` - Document parsing and extraction
 - `chat` - Chat module
 - `web_search` - Web search module
 
 **Module categories**
 
-- **Regular Module** — Regular modules are typically independent, expose their own versioned public API, and are responsible for their own domain end-to-end, including module business logic, data storage, migrations, and module API documentation. Regular modules **cannot** depend on or consume plugin modules directly—all plugin functionality must be accessed through a Gateway Module's public API.
-- **Gateway Module** — Gateway modules are Regular Modules that define a **plugin contract** and route requests to one or more Plugin Modules at runtime. They expose a public API and delegate execution to the selected plugin based on configuration or context. See [MODKIT_PLUGINS.md](MODKIT_PLUGINS.md) for the Gateway + Plugin pattern.
-- **Plugin Module** — Plugins are special modules identified by a **GTS instance ID** that implement a gateway-defined contract. They do not expose their own **public API** and act as pluggable workers. Plugins register themselves in the types-registry for runtime discovery — see [MODKIT_PLUGINS.md](MODKIT_PLUGINS.md) for details.
+- **Regular Module** — Regular modules are typically independent, expose their own versioned public API, and are responsible for their own domain end-to-end, including module business logic, data storage, migrations, and module API documentation. Regular modules **cannot** depend on or consume plugin modules directly—all plugin functionality must be accessed through the main module's public API.
+- **Module with plugins** — Modules with plugins are Regular Modules that define a **plugin contract** and route requests to one or more Plugin Modules at runtime. They expose a public API and delegate execution to the selected plugin based on configuration or context. See [MODKIT_PLUGINS.md](MODKIT_PLUGINS.md) for the Module + Plugin pattern.
+- **Plugin Module** — Plugins are special modules identified by a **GTS instance ID** that implement a module-defined contract. They do not expose their own **public API** and act as pluggable workers. Plugins register themselves in the types-registry for runtime discovery — see [MODKIT_PLUGINS.md](MODKIT_PLUGINS.md) for details.
 
 **Module structure:**
 
-| Module layer | Regular module | Gateway module | Plugin module |
+| Module layer | Regular module | Module with plugins | Plugin module |
 | --- | --- | --- | --- |
 | API layer @ api/ | Yes | Yes | No |
 | Business logic layer @ domain/ | Yes | Yes (contract, router) | Yes, main logic |
 | Infrastructure layer @ infrastructure/ | Likely | Rare | Likely |
 | Gateway layer @ gateways/ | Yes, if depends on other modules | Yes, workers connectors | Yes, clients to some service |
-| Examples | Any CRUD module (TODO) | file_parser, (TODO) | file_parser_tika, (TODO) |
+| Examples | Any CRUD module (TODO) | file-parser, (TODO) | file-parser-tika, (TODO) |
 
 See below typical modules categories, internal layout and typical modules relationship:
 
@@ -234,8 +234,8 @@ hyperspot/
 ├── guidelines/        # Coding standards and best practices for LLMs
 ├── libs/              # Shared libraries (modkit, modkit-db, modkit-auth, etc.)
 ├── modules/           # Business logic modules
-│   ├── system/        # Core system modules (api_gateway, grpc_hub, module_orchestrator, nodes_registry, types-registry)
-│   └── ...            # User modules (file_parser, etc.)
+│   ├── system/        # Core system modules (api-gateway, grpc-hub, module-orchestrator, nodes-registry, types-registry)
+│   └── ...            # User modules (file-parser, etc.)
 ├── scripts/           # Custom scripts for build, testing, etc.
 └── testing/           # E2E and integration tests (pytest)
 ```
@@ -284,8 +284,8 @@ modules/<module-dir>/
 
 Additional common patterns (see `examples/`):
 
-- **Gateway + plugins pattern** (pluggable workers via `ClientHub` scopes):
-  - Gateway crate: `<module>-gw/`
+- **Module + plugins pattern** (pluggable workers via `ClientHub` scopes):
+  - Module crate: `<module>/`
   - SDK crate: `<module>-sdk/`
   - Plugin crates: `plugins/<vendor>_<plugin>/`
 
@@ -318,8 +318,10 @@ Every HyperSpot module uses the **ModKit** framework, which provides:
 
  **Key ModKit libraries:**
  - `modkit` - Core module framework: lifecycle, REST host/contracts, OpenAPI registry, ClientHub, tracing helpers
+ - `modkit-macros` - Procedural macros for module registration (`#[modkit::module(...)]`) and domain model enforcement (`#[domain_model]`)
+ - `modkit-auth` - Authentication and authorization: inbound JWT/OIDC validation with route policies, outbound OAuth2 client credentials with automatic token refresh and `Authorization: Bearer` injection ([ADR](adrs/modkit/0002-modkit-auth-client-with-aliri.md))
  - `modkit-macros` - Procedural macros for module registration (`#[modkit::module(...)]`)
- - `modkit-auth` - Authn/z plumbing for gateway and route policies
+ - `modkit-http` - First-party HTTP client (`hyper + tower`): TLS, retries, timeouts, concurrency limiting, decompression, OTel tracing, and extensible auth layer hook ([ADR](adrs/modkit/0001-modkit-hyper-tower-http-client.md))
  - `modkit-security` - `SecurityContext` and security-scoping primitives used across modules (request-scoped context)
  - `modkit-errors` - Shared error types and RFC-9457 Problem modeling utilities
  - `modkit-errors-macro` - Macros/codegen for error catalogs
@@ -335,7 +337,7 @@ Every HyperSpot module uses the **ModKit** framework, which provides:
 
 ### 6.1. DNA - Development Guidelines
 
-[DNA](https://github.com/hypernetix/DNA) is HyperSpot's collection of development standards and best practices:
+[DNA](https://github.com/cyberfabric/DNA) is HyperSpot's collection of development standards and best practices:
 - **REST API design**: Status codes, pagination, error handling
 
 **Key guidelines:**

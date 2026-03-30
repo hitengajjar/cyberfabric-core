@@ -31,8 +31,10 @@ ApiResult<T> = Result<T, Problem>  (handler return type)
 ## Domain Error (`<module>/src/domain/error.rs`)
 
 ```rust
+use modkit_macros::domain_model;
 use thiserror::Error;
 
+#[domain_model]
 #[derive(Error, Debug, Clone)]
 pub enum DomainError {
     #[error("User not found: {id}")]
@@ -166,7 +168,7 @@ use modkit::api::prelude::*;
 use crate::domain::error::DomainError;
 
 pub async fn get_user(
-    Authz(ctx): Authz,
+    Extension(ctx): Extension<SecurityContext>,
     Extension(svc): Extension<Arc<Service>>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<JsonBody<UserDto>> {
@@ -181,7 +183,8 @@ pub async fn get_user(
 ```rust
 OperationBuilder::get("/users-info/v1/users/{id}")
     .operation_id("users_info.get_user")
-    .require_auth(&Resource::Users, &Action::Read)
+    .authenticated()
+    .require_license_features::<License>([])
     .handler(handlers::get_user)
     .json_response_with_schema::<UserDto>(openapi, StatusCode::OK, "User")
     .error_404(openapi)

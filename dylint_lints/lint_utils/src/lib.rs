@@ -8,8 +8,11 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 use rustc_lint::LintContext;
+
+use rustc_ast::{UseTree, UseTreeKind};
+
 use rustc_span::source_map::SourceMap;
-use rustc_span::{FileName, Span};
+use rustc_span::{FileName, RealFileName, Span};
 use std::collections::HashSet;
 
 const ALLOWED_FLAGS: &[&str] = &["request", "response"];
@@ -28,7 +31,10 @@ pub fn is_in_contract_path(source_map: &SourceMap, span: Span) -> bool {
 
 /// AST-based helper to check if an item is in a contract module.
 /// This works with EarlyLintPass and checks both file paths and simulated_dir comments.
-pub fn is_in_contract_module_ast(cx: &rustc_lint::EarlyContext<'_>, item: &rustc_ast::Item) -> bool {
+pub fn is_in_contract_module_ast(
+    cx: &rustc_lint::EarlyContext<'_>,
+    item: &rustc_ast::Item,
+) -> bool {
     is_in_contract_path(cx.sess().source_map(), item.span)
 }
 
@@ -38,6 +44,184 @@ pub fn is_in_api_rest_folder(source_map: &SourceMap, span: Span) -> bool {
 
 pub fn is_in_module_folder(source_map: &SourceMap, span: Span) -> bool {
     check_span_path(source_map, span, "/modules/")
+}
+
+/// Extract the filename string from a span.
+/// Handles local paths and remapped paths with virtual name fallback.
+pub fn filename_str(source_map: &SourceMap, span: Span) -> Option<String> {
+    let file_name = source_map.span_to_filename(span);
+    match &file_name {
+        FileName::Real(real) => {
+            if let Some(local) = real.local_path() {
+                Some(local.to_string_lossy().to_string())
+            } else if let RealFileName::Remapped { virtual_name, .. } = real {
+                Some(virtual_name.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if a file path is in a temporary directory (used by test infrastructure).
+pub fn is_temp_path(path: &str) -> bool {
+    // Primary check: compare against the actual system temp directory
+    let temp_dir = std::env::temp_dir();
+    if let Some(temp_str) = temp_dir.to_str() {
+        if path.starts_with(temp_str) {
+            return true;
+        }
+    }
+    // Fallback patterns for known temp directory locations
+    path.contains("/tmp/")
+        || path.contains("/var/folders/")
+        || path.contains("\\Temp\\")
+}
+
+/// Result of parsing a version suffix from a name like `FooClientV1` or `FooClient2`.
+pub struct VersionParts<'a> {
+    /// Base name without version suffix or trailing digits (e.g., `FooClient`)
+    pub base: &'a str,
+    /// Valid version suffix like `V1`, `V2`, or empty string if none
+    pub version_suffix: &'a str,
+    /// Trailing digits without V prefix (e.g., `2` from `FooClient2`), or empty string
+    pub malformed_digits: &'a str,
+}
+
+impl VersionParts<'_> {
+    /// Returns true if a valid version suffix (V + digits) was found.
+    pub fn has_valid_version(&self) -> bool {
+        !self.version_suffix.is_empty()
+    }
+
+    /// Returns true if there are trailing digits but no V prefix (malformed version).
+    pub fn has_malformed_version(&self) -> bool {
+        !self.malformed_digits.is_empty() && self.version_suffix.is_empty()
+    }
+}
+
+/// Parse version suffix from a trait/type name.
+///
+/// - `FooClientV1`  -> base=`FooClient`, version_suffix=`V1`, malformed_digits=``
+/// - `FooClientV10` -> base=`FooClient`, version_suffix=`V10`, malformed_digits=``
+/// - `FooClient2`   -> base=`FooClient`, version_suffix=``, malformed_digits=`2`
+/// - `FooClient`    -> base=`FooClient`, version_suffix=``, malformed_digits=``
+/// - `FooClientV`   -> base=`FooClient`, version_suffix=``, malformed_digits=`` (bare V stripped)
+/// - `FooClientV0`  -> base=`FooClient`, version_suffix=``, malformed_digits=`` (V0 rejected)
+/// - `FooClientV01` -> base=`FooClient`, version_suffix=``, malformed_digits=`` (leading zero rejected)
+pub fn parse_version_suffix(name: &str) -> VersionParts<'_> {
+    if name.is_empty() {
+        return VersionParts {
+            base: name,
+            version_suffix: "",
+            malformed_digits: "",
+        };
+    }
+
+    let bytes = name.as_bytes();
+    let len = bytes.len();
+
+    let mut digit_count = 0;
+    for &b in bytes.iter().rev() {
+        if b.is_ascii_digit() {
+            digit_count += 1;
+        } else {
+            break;
+        }
+    }
+
+    if digit_count == 0 {
+        // No trailing digits — check for bare trailing V (e.g., `FooClientV`)
+        if len > 1 && bytes[len - 1] == b'V' {
+            return VersionParts {
+                base: &name[..len - 1],
+                version_suffix: "",
+                malformed_digits: "",
+            };
+        }
+        return VersionParts {
+            base: name,
+            version_suffix: "",
+            malformed_digits: "",
+        };
+    }
+
+    let digits_start = len - digit_count;
+
+    if digits_start > 0 && bytes[digits_start - 1] == b'V' {
+        let v_pos = digits_start - 1;
+        let digit_str = &name[digits_start..];
+
+        // Valid version: V followed by non-zero number without leading zeros (V1, V2, V10)
+        // Invalid: V0, V00, V01 (leading zeros or zero version)
+        if !digit_str.starts_with('0') {
+            VersionParts {
+                base: &name[..v_pos],
+                version_suffix: &name[v_pos..],
+                malformed_digits: "",
+            }
+        } else {
+            // V0, V00, V01 — strip the invalid V-prefix version from base
+            VersionParts {
+                base: &name[..v_pos],
+                version_suffix: "",
+                malformed_digits: "",
+            }
+        }
+    } else {
+        VersionParts {
+            base: &name[..digits_start],
+            version_suffix: "",
+            malformed_digits: &name[digits_start..],
+        }
+    }
+}
+
+/// Check if the current compilation target is an SDK crate (by crate name or file path).
+///
+/// Also returns true for files in temporary directories — this is required because
+/// `dylint_testing::ui_test_examples()` compiles UI test files from temp dirs without
+/// passing `--crate-name`, so the crate name check alone doesn't work for UI tests.
+pub fn is_in_sdk_crate(cx: &rustc_lint::EarlyContext<'_>, span: Span) -> bool {
+    if let Some(crate_name) = cx.sess().opts.crate_name.as_deref() {
+        // Cargo normalizes dashes to underscores for `--crate-name`.
+        if crate_name.ends_with("-sdk") || crate_name.ends_with("_sdk") {
+            return true;
+        }
+    }
+
+    let Some(file_path) = filename_str(cx.sess().source_map(), span) else {
+        return false;
+    };
+
+    file_path.contains("-sdk/")
+        || file_path.contains("-sdk\\")
+        || is_temp_path(&file_path)
+}
+
+/// Check if span is within libs/modkit-db/ - the internal sqlx wrapper library
+/// This path is excluded from sqlx restrictions as it provides the abstraction layer
+pub fn is_in_modkit_db_path(source_map: &SourceMap, span: Span) -> bool {
+    // Multiple checks handle different path contexts:
+    // - "/libs/modkit-db/" - absolute path from workspace root
+    // - "libs/modkit-db/" - relative path in some contexts
+    // - "modkit-db/src/" - simulated_dir paths in tests
+    check_span_path(source_map, span, "/libs/modkit-db/")
+        || check_span_path(source_map, span, "libs/modkit-db/")
+        || check_span_path(source_map, span, "modkit-db/src/")
+}
+
+/// Check if span is within apps/hyperspot-server - the main server binary
+/// This path is excluded from sqlx restrictions as it needs driver linkage workaround
+pub fn is_in_hyperspot_server_path(source_map: &SourceMap, span: Span) -> bool {
+    // Multiple checks handle different path contexts:
+    // - "/apps/hyperspot-server/" - absolute path from workspace root
+    // - "apps/hyperspot-server/" - relative path in some contexts
+    // - "hyperspot-server/src/" - simulated_dir paths in tests
+    check_span_path(source_map, span, "/apps/hyperspot-server/")
+        || check_span_path(source_map, span, "apps/hyperspot-server/")
+        || check_span_path(source_map, span, "hyperspot-server/src/")
 }
 
 pub fn check_derive_attrs<F>(item: &rustc_ast::Item, mut f: F)
@@ -112,7 +296,11 @@ pub fn has_api_dto_attribute(item: &rustc_ast::Item) -> bool {
         // Check for modkit_macros::api_dto or just api_dto
         if let rustc_ast::AttrKind::Normal(attr_item) = &attr.kind {
             let path = &attr_item.item.path;
-            let segments: Vec<&str> = path.segments.iter().map(|s| s.ident.name.as_str()).collect();
+            let segments: Vec<&str> = path
+                .segments
+                .iter()
+                .map(|s| s.ident.name.as_str())
+                .collect();
 
             // Match: api_dto, modkit_macros::api_dto
             if segments.last() == Some(&"api_dto") {
@@ -142,7 +330,11 @@ pub fn get_api_dto_args(item: &rustc_ast::Item) -> Option<ApiDtoArgs> {
     for attr in &item.attrs {
         if let rustc_ast::AttrKind::Normal(attr_item) = &attr.kind {
             let path = &attr_item.item.path;
-            let segments: Vec<&str> = path.segments.iter().map(|s| s.ident.name.as_str()).collect();
+            let segments: Vec<&str> = path
+                .segments
+                .iter()
+                .map(|s| s.ident.name.as_str())
+                .collect();
 
             if segments.last() != Some(&"api_dto") {
                 continue;
@@ -158,19 +350,19 @@ pub fn get_api_dto_args(item: &rustc_ast::Item) -> Option<ApiDtoArgs> {
                 for arg in args {
                     if let Some(ident) = arg.ident() {
                         let flag_str = ident.name.as_str();
-                        
+
                         // Check if flag is allowed
                         if !ALLOWED_FLAGS.contains(&flag_str) {
                             has_invalid = true;
                             break;
                         }
-                        
+
                         // Check for duplicates (convert to String for storage)
                         if !seen_flags.insert(flag_str.to_string()) {
                             has_invalid = true;
                             break;
                         }
-                        
+
                         match flag_str {
                             "request" => has_request = true,
                             "response" => has_response = true,
@@ -184,7 +376,7 @@ pub fn get_api_dto_args(item: &rustc_ast::Item) -> Option<ApiDtoArgs> {
             if has_invalid {
                 return None;
             }
-            
+
             // Reject empty attributes (no request or response)
             if !has_request && !has_response {
                 return None;
@@ -266,10 +458,61 @@ pub fn is_utoipa_trait(segments: &[&str], trait_name: &str) -> bool {
     }
 }
 
+/// Converts a UseTree to a vector of fully qualified path strings.
+/// Handles Simple, Glob, and Nested use tree kinds.
+///
+/// Examples:
+/// - `use foo::bar` -> `["foo::bar"]`
+/// - `use foo::{bar, baz}` -> `["foo::bar", "foo::baz"]`
+/// - `use foo::*` -> `["foo"]`
+pub fn use_tree_to_strings(tree: &UseTree) -> Vec<String> {
+    match &tree.kind {
+        UseTreeKind::Simple(..) | UseTreeKind::Glob => {
+            vec![
+                tree.prefix
+                    .segments
+                    .iter()
+                    .map(|seg| seg.ident.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            ]
+        }
+        UseTreeKind::Nested { items, .. } => {
+            let prefix = tree
+                .prefix
+                .segments
+                .iter()
+                .map(|seg| seg.ident.name.as_str())
+                .collect::<Vec<_>>()
+                .join("::");
+
+            let mut paths = Vec::new();
+            for (nested_tree, _) in items {
+                for nested_str in use_tree_to_strings(nested_tree) {
+                    if nested_str.is_empty() {
+                        paths.push(prefix.clone());
+                    } else if prefix.is_empty() {
+                        paths.push(nested_str);
+                    } else {
+                        paths.push(format!("{}::{}", prefix, nested_str));
+                    }
+                }
+            }
+            if paths.is_empty() {
+                vec![prefix]
+            } else {
+                paths
+            }
+        }
+    }
+}
+
 fn check_span_path(source_map: &SourceMap, span: Span, pattern: &str) -> bool {
     let pattern_windows = pattern.replace('/', "\\");
-    let path_str =
-        get_path_str_from_session(source_map, span).expect("Failed to get test file path");
+    let Some(path_str) = get_path_str_from_session(source_map, span) else {
+        // If we can't get the path (e.g., synthetic/virtual files), assume not matching
+        return false;
+    };
 
     // Check for simulated directory in test files first
     if let Some(simulated) = extract_simulated_dir(&path_str) {
@@ -301,7 +544,7 @@ fn get_path_str_from_session(source_map: &SourceMap, span: Span) -> Option<Strin
 /// Only checks files in temporary directories to avoid unnecessary file I/O in production.
 fn extract_simulated_dir(path_str: &str) -> Option<String> {
     // Only check for simulated_dir in temporary paths (tests run in temp directories)
-    let is_temp = path_str.contains("/tmp/") 
+    let is_temp = path_str.contains("/tmp/")
         || path_str.contains("/var/folders/")  // macOS temp
         || path_str.contains("\\Temp\\")        // Windows temp
         || path_str.contains(".tmp"); // dylint test temp dirs
@@ -362,14 +605,17 @@ pub fn test_comment_annotations_match_stderr(
         })
         .collect();
 
-    assert!(!rs_files.is_empty(), "No .rs test files found in ui directory");
+    assert!(
+        !rs_files.is_empty(),
+        "No .rs test files found in ui directory"
+    );
 
     for rs_file in rs_files {
         let stderr_file = rs_file.with_extension("stderr");
 
         // Read the .rs file
-        let rs_content = fs::read_to_string(&rs_file)
-            .unwrap_or_else(|_| panic!("Failed to read {:?}", rs_file));
+        let rs_content =
+            fs::read_to_string(&rs_file).unwrap_or_else(|_| panic!("Failed to read {:?}", rs_file));
 
         // Read the .stderr file (if it exists)
         let stderr_content = fs::read_to_string(&stderr_file).unwrap_or_default();

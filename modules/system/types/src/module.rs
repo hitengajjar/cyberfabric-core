@@ -31,9 +31,10 @@ use crate::domain::TypesLocalClient;
 /// - Any future core framework types
 #[modkit::module(
     name = "types",
-    deps = ["types_registry"],
+    deps = ["types-registry"],
     capabilities = [system]
 )]
+#[derive(Clone)]
 pub struct Types {
     ready: Arc<AtomicBool>,
 }
@@ -46,19 +47,9 @@ impl Default for Types {
     }
 }
 
-impl Clone for Types {
-    fn clone(&self) -> Self {
-        Self {
-            ready: Arc::clone(&self.ready),
-        }
-    }
-}
-
 #[async_trait]
 impl Module for Types {
     async fn init(&self, ctx: &ModuleCtx) -> anyhow::Result<()> {
-        info!("Initializing types module");
-
         // Get the types registry client
         let registry = ctx.client_hub().get::<dyn TypesRegistryClient>()?;
 
@@ -80,8 +71,6 @@ impl Module for Types {
 
         let api: Arc<dyn TypesClient> = Arc::new(client);
         ctx.client_hub().register::<dyn TypesClient>(api);
-
-        info!("Types module initialized");
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 [package]
 name = "cf-modkit-auth"
-version.workspace = true
+version = "0.6.1"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -17,10 +17,6 @@ name = "modkit_auth"
 [lints]
 workspace = true
 
-[[example]]
-name = "dispatcher_usage"
-path = "examples/dispatcher_usage.rs"
-
 [dependencies]
 # Core dependencies
 uuid = { workspace = true }
@@ -29,19 +25,29 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 time = { workspace = true }
 arc-swap = { workspace = true }
 tracing = { workspace = true }
 jsonwebtoken = { workspace = true }
-reqwest = { workspace = true, features = [
-    "json",
-    "rustls-tls",
-], default-features = false }
-axum = { workspace = true, optional = true }
-tower = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
+tower = { workspace = true }
+http = { workspace = true }
 modkit-security = { workspace = true }
 
-[features]
-default = ["axum-ext"]
-axum-ext = ["axum", "tower", "http"]
+# HTTP client
+modkit-http = { workspace = true }
+url = { workspace = true }
+
+# OAuth2 token lifecycle
+aliri_tokens = { workspace = true }
+aliri_clock = { workspace = true }
+base64 = { workspace = true }
+
+# Shared utilities
+modkit-utils = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+httpmock = { workspace = true }

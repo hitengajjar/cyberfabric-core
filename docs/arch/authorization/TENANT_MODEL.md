@@ -1,6 +1,6 @@
 # Tenant Model
 
-This document describes HyperSpot's multi-tenancy model, tenant topology, and isolation mechanisms.
+This document describes Cyber Fabric's multi-tenancy model, tenant topology, and isolation mechanisms.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ This document describes HyperSpot's multi-tenancy model, tenant topology, and is
 
 ## Overview
 
-HyperSpot uses a **hierarchical multi-tenancy** model where tenants form a forest (multiple independent trees). Each tenant can have child tenants, creating organizational structures like:
+Cyber Fabric uses a **hierarchical multi-tenancy** model where tenants form a forest (multiple independent trees). Each tenant can have child tenants, creating organizational structures like:
 
 ```
 Vendor
@@ -149,7 +149,7 @@ Two different tenant concepts appear in authorization:
 ```jsonc
 {
   "subject": {
-    "properties": { "tenant_id": "T1" }  // Subject tenant (optional)
+    "properties": { "tenant_id": "T1" }  // Subject tenant
   },
   "context": {
     "tenant_context": {
@@ -158,8 +158,8 @@ Two different tenant concepts appear in authorization:
     }
     // OR for subtree:
     // "tenant_context": {
-    //   "mode": "subtree",   // T1 + descendants
-    //   "root_id": "T1"
+    //   "mode": "subtree",   // T2 + descendants
+    //   "root_id": "T2"
     // }
   }
 }
@@ -179,7 +179,7 @@ Many operations need to query "all resources in tenant T and its children". This
 | Explicit ID list from PDP | Simple SQL | Doesn't scale (thousands of IDs) |
 | Closure table | O(1) JOIN, scales well | Requires sync, storage overhead |
 
-HyperSpot recommends **closure tables** for production deployments with hierarchical tenants.
+Cyber Fabric recommends **closure tables** for production deployments with hierarchical tenants.
 
 **Tenant scope parameters (in `context.tenant_context`):**
 

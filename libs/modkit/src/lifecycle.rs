@@ -76,7 +76,9 @@ pub struct ReadySignal(oneshot::Sender<()>);
 impl ReadySignal {
     #[inline]
     pub fn notify(self) {
-        let _ = self.0.send(());
+        if self.0.send(()).is_err() {
+            tracing::debug!("ReadySignal::notify: receiver already dropped");
+        }
     }
     /// Construct a `ReadySignal` from a oneshot sender (used by macro-generated shims).
     #[inline]
@@ -276,7 +278,7 @@ impl Lifecycle {
             let status_on_ready = self.status.clone();
             tokio::spawn(async move {
                 if ready_rx.await.is_ok() {
-                    let _ = status_on_ready.compare_exchange(
+                    _ = status_on_ready.compare_exchange(
                         Status::Starting.as_u8(),
                         Status::Running.as_u8(),
                         Ordering::AcqRel,
@@ -608,11 +610,11 @@ impl<T: Runnable> crate::contracts::RunnableCapability for WithLifecycle<T> {
     async fn stop(&self, external_cancel: CancellationToken) -> TaskResult<()> {
         tokio::select! {
             res = self.lc.stop(self.stop_timeout) => {
-                let _ = res.map_err(anyhow::Error::from)?;
+                _ = res.map_err(anyhow::Error::from)?;
                 Ok(())
             }
             () = external_cancel.cancelled() => {
-                let _ = self.lc.stop(Duration::from_millis(0)).await?;
+                _ = self.lc.stop(Duration::from_millis(0)).await?;
                 Ok(())
             }
         }
@@ -721,7 +723,7 @@ mod tests {
 
         let (ready_tx, ready_rx) = oneshot::channel::<()>();
         lc.start_with_ready(move |cancel, ready| async move {
-            let _ = ready_rx.await;
+            _ = ready_rx.await;
             ready.notify();
             cancel.cancelled().await;
             Ok(())
@@ -730,7 +732,7 @@ mod tests {
 
         assert_eq!(lc.status(), Status::Starting);
 
-        let _ = ready_tx.send(());
+        _ = ready_tx.send(());
         sleep(Duration::from_millis(10)).await;
         assert_eq!(lc.status(), Status::Running);
 

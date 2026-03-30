@@ -11,6 +11,7 @@ use syn::{
 
 mod api_dto;
 mod domain_model;
+mod expand_vars;
 mod grpc_client;
 mod utils;
 
@@ -116,6 +117,68 @@ impl Capability {
     }
 }
 
+/// Validates that a module name follows kebab-case naming convention.
+///
+/// # Rules
+/// - Must contain only lowercase letters (a-z), digits (0-9), and hyphens (-)
+/// - Must start with a lowercase letter
+/// - Must not end with a hyphen
+/// - Must not contain consecutive hyphens
+/// - Must not contain underscores (use hyphens instead)
+///
+/// # Examples
+/// Valid: "file-parser", "api-gateway", "simple-user-settings", "types-registry"
+/// Invalid: "`file_parser`" (underscores), "`FileParser`" (uppercase), "-parser" (starts with hyphen)
+fn validate_kebab_case(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("module name cannot be empty".to_owned());
+    }
+
+    // Check for underscores (common mistake)
+    if name.contains('_') {
+        let suggested = name.replace('_', "-");
+        return Err(format!(
+            "module name must use kebab-case, not snake_case\n       = help: use '{suggested}' instead of '{name}'"
+        ));
+    }
+
+    // Must start with a lowercase letter
+    if let Some(first_char) = name.chars().next() {
+        if !first_char.is_ascii_lowercase() {
+            return Err(format!(
+                "module name must start with a lowercase letter, found '{first_char}'"
+            ));
+        }
+    } else {
+        // This should never happen due to the empty check above
+        return Err("module name cannot be empty".to_owned());
+    }
+
+    // Must not end with hyphen
+    if name.ends_with('-') {
+        return Err("module name must not end with a hyphen".to_owned());
+    }
+
+    // Check for invalid characters and consecutive hyphens
+    let mut prev_was_hyphen = false;
+    for ch in name.chars() {
+        if ch == '-' {
+            if prev_was_hyphen {
+                return Err("module name must not contain consecutive hyphens".to_owned());
+            }
+            prev_was_hyphen = true;
+        } else if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            prev_was_hyphen = false;
+        } else {
+            return Err(format!(
+                "module name must contain only lowercase letters, digits, and hyphens, found '{ch}'"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct LcModuleCfg {
     entry: String,        // entry method name (e.g., "serve")
@@ -166,7 +229,12 @@ impl Parse for ModuleConfig {
                         Expr::Lit(syn::ExprLit {
                             lit: Lit::Str(s), ..
                         }) => {
-                            name = Some(s.value());
+                            let module_name = s.value();
+                            // Validate kebab-case format
+                            if let Err(err) = validate_kebab_case(&module_name) {
+                                return Err(syn::Error::new_spanned(s, err));
+                            }
+                            name = Some(module_name);
                         }
                         other => {
                             return Err(syn::Error::new_spanned(
@@ -725,7 +793,7 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
             #(#capability_registrations)*
         }
 
-        ::inventory::submit! {
+        ::modkit::inventory::submit! {
             ::modkit::registry::Registrator(#registrator_name)
         }
 
@@ -1169,4 +1237,26 @@ pub fn api_dto(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn domain_model(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     TokenStream::from(domain_model::expand_domain_model(&input))
+}
+
+/// Derive macro that implements [`modkit::var_expand::ExpandVars`].
+///
+/// Mark individual `String` or `Option<String>` fields with `#[expand_vars]`
+/// to have `${VAR}` placeholders expanded from environment variables when
+/// `expand_vars()` is called.
+///
+/// ```ignore
+/// #[derive(Deserialize, Default, ExpandVars)]
+/// pub struct MyConfig {
+///     #[expand_vars]
+///     pub api_key: String,
+///     #[expand_vars]
+///     pub endpoint: Option<String>,
+///     pub retries: u32, // not expanded
+/// }
+/// ```
+#[proc_macro_derive(ExpandVars, attributes(expand_vars))]
+pub fn derive_expand_vars(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    TokenStream::from(expand_vars::derive(&input))
 }

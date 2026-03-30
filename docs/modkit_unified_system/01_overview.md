@@ -3,7 +3,7 @@
 ## What ModKit provides
 
 - **Composable modules** discovered via `inventory`, initialized in dependency order.
-- **Gateway as a module** (e.g., `api_gateway`) that owns the Axum router and OpenAPI document.
+- **Gateway as a module** (e.g., `api-gateway`) that owns the Axum router and OpenAPI document.
 - **Type-safe REST** via an operation builder that prevents half-wired routes at compile time.
 - **Server-Sent Events (SSE)** with type-safe broadcasters and domain event integration.
 - **OpenAPI 3.1** generation using `utoipa` with automatic schema registration for DTOs.
@@ -18,7 +18,7 @@
 - **SDK pattern is the public API**: Use `<module>-sdk` crate for traits, models, errors. Do not expose internals.
 - **Secure-by-default DB access**: Use `SecureConn` + `AccessScope`. Modules cannot access raw database connections.
 - **RFC-9457 errors everywhere**: Use `Problem` (implements `IntoResponse`). Do not use `ProblemResponse`.
-- **Type-safe REST**: Use `OperationBuilder` with `.require_auth()` and `.standard_errors()`.
+- **Type-safe REST**: Use `OperationBuilder` with `.authenticated()` and `.standard_errors()`.
 - **OData macros are in `modkit-odata-macros`**: Use `modkit_odata_macros::ODataFilterable`.
 - **ClientHub registration**: `ctx.client_hub().register::<dyn MyModuleApi>(api)`; `ctx.client_hub().get::<dyn MyModuleApi>()?`.
 - **Cancellation**: Pass `CancellationToken` to background tasks for cooperative shutdown.
@@ -38,7 +38,7 @@ pub struct MyModule { /* ... */ }
 
 // Secure DB access
 let secure_conn = db.sea_secure();
-let scope = modkit_db::secure::AccessScope::tenant(ctx.tenant_id());
+let scope = modkit_db::secure::AccessScope::for_tenant(ctx.tenant_id());
 let users = secure_conn
     .find::<user::Entity>(&scope)
     .all(&secure_conn)
@@ -54,7 +54,8 @@ fn handler() -> ApiResult<T> { /* ... */ }
 
 // REST wiring
 OperationBuilder::get("/users")
-    .require_auth(&Resource::Users, &Action::Read)
+    .authenticated()
+    .require_license_features::<License>([])
     .handler(handler)
     .json_response_with_schema::<UserDto>(openapi, StatusCode::OK, "Users")
     .standard_errors(openapi)

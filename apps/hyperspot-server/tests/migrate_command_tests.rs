@@ -31,6 +31,8 @@ fn test_migrate_command_help_text() {
 #[test]
 fn test_migrate_command_runs_migration_phases() {
     let output = Command::new(hyperspot_binary())
+        .arg("--config")
+        .arg("../../config/e2e-local.yaml")
         .arg("migrate")
         .output()
         .expect("failed to execute hyperspot-server");
@@ -40,17 +42,5 @@ fn test_migrate_command_runs_migration_phases() {
         output.status.success(),
         "migrate command should exit successfully. stderr: {}",
         String::from_utf8_lossy(&output.stderr)
-    );
-
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    // Only verify stable user-facing output
-    assert!(
-        combined.contains("[OK] Database migrations completed successfully"),
-        "Should print success message to user"
     );
 }

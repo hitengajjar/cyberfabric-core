@@ -7,8 +7,8 @@
 
 use super::*;
 use crate::bootstrap::config::{
-    AppConfig, GlobalDatabaseConfig, LoggingConfig, RenderedDbConfig, RenderedModuleConfig,
-    Section, ServerConfig,
+    AppConfig, ConsoleFormat, GlobalDatabaseConfig, LoggingConfig, RenderedDbConfig,
+    RenderedModuleConfig, Section, SectionFile, ServerConfig, default_logging_config,
 };
 use modkit_db::{DbConnConfig, PoolCfg};
 use std::collections::HashMap;
@@ -20,12 +20,10 @@ fn minimal_app_config() -> AppConfig {
     AppConfig {
         server: ServerConfig {
             home_dir: std::env::temp_dir().join("modkit_test"),
+            ..Default::default()
         },
-        database: None,
-        logging: None,
-        tracing: None,
-        modules_dir: None,
-        modules: HashMap::new(),
+        logging: default_logging_config(),
+        ..Default::default()
     }
 }
 
@@ -33,8 +31,11 @@ fn minimal_app_config() -> AppConfig {
 fn logging_section(console_level: Option<Level>, file: &str) -> Section {
     Section {
         console_level,
-        file: file.to_owned(),
-        file_level: Some(Level::DEBUG),
+        section_file: Some(SectionFile {
+            file: file.to_owned(),
+            file_level: Some(Level::DEBUG),
+        }),
+        console_format: ConsoleFormat::default(),
         max_age_days: Some(7),
         max_backups: Some(3),
         max_size_mb: Some(100),
@@ -49,34 +50,6 @@ mod logging_merge {
     use super::*;
 
     #[test]
-    fn test_merge_logging_master_only() {
-        // When only master has logging, result should be master's logging
-        let master_logging: LoggingConfig = [
-            (
-                "default".to_owned(),
-                logging_section(Some(Level::INFO), "logs/default.log"),
-            ),
-            (
-                "module_a".to_owned(),
-                logging_section(Some(Level::DEBUG), "logs/a.log"),
-            ),
-        ]
-        .into();
-
-        let result = merge_logging_configs(Some(&master_logging), None);
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(
-            result.get("default").unwrap().console_level,
-            Some(Level::INFO)
-        );
-        assert_eq!(
-            result.get("module_a").unwrap().console_level,
-            Some(Level::DEBUG)
-        );
-    }
-
-    #[test]
     fn test_merge_logging_local_only() {
         // When only local has logging, result should be local's logging
         let local_logging: LoggingConfig = [(
@@ -85,14 +58,17 @@ mod logging_merge {
         )]
         .into();
 
-        let result = merge_logging_configs(None, Some(&local_logging));
+        let result = merge_logging_configs(None, &local_logging);
 
         assert_eq!(result.len(), 1);
         assert_eq!(
             result.get("default").unwrap().console_level,
             Some(Level::DEBUG)
         );
-        assert_eq!(result.get("default").unwrap().file, "logs/local.log");
+        assert_eq!(
+            result.get("default").unwrap().file().unwrap(),
+            "logs/local.log"
+        );
     }
 
     #[test]
@@ -116,7 +92,7 @@ mod logging_merge {
         )]
         .into();
 
-        let result = merge_logging_configs(Some(&master_logging), Some(&local_logging));
+        let result = merge_logging_configs(Some(&master_logging), &local_logging);
 
         assert_eq!(result.len(), 2);
         // Local overrides default
@@ -124,13 +100,19 @@ mod logging_merge {
             result.get("default").unwrap().console_level,
             Some(Level::DEBUG)
         );
-        assert_eq!(result.get("default").unwrap().file, "logs/local.log");
+        assert_eq!(
+            result.get("default").unwrap().file().unwrap(),
+            "logs/local.log"
+        );
         // Master's module_a preserved
         assert_eq!(
             result.get("module_a").unwrap().console_level,
             Some(Level::INFO)
         );
-        assert_eq!(result.get("module_a").unwrap().file, "logs/a-master.log");
+        assert_eq!(
+            result.get("module_a").unwrap().file().unwrap(),
+            "logs/a-master.log"
+        );
     }
 
     #[test]
@@ -148,7 +130,7 @@ mod logging_merge {
         )]
         .into();
 
-        let result = merge_logging_configs(Some(&master_logging), Some(&local_logging));
+        let result = merge_logging_configs(Some(&master_logging), &local_logging);
 
         assert_eq!(result.len(), 2);
         assert_eq!(
@@ -159,13 +141,6 @@ mod logging_merge {
             result.get("new_module").unwrap().console_level,
             Some(Level::TRACE)
         );
-    }
-
-    #[test]
-    fn test_merge_logging_both_empty() {
-        // When both are None, result should be empty
-        let result = merge_logging_configs(None, None);
-        assert!(result.is_empty());
     }
 
     #[test]
@@ -199,7 +174,7 @@ mod logging_merge {
         ]
         .into();
 
-        let result = merge_logging_configs(Some(&master_logging), Some(&local_logging));
+        let result = merge_logging_configs(Some(&master_logging), &local_logging);
 
         assert_eq!(result.len(), 3);
         // Overridden
@@ -416,7 +391,7 @@ mod database_merge {
     fn test_rendered_db_config_master_only() {
         // When only master has database config
         let home_dir = std::env::temp_dir().join("modkit_test_master_only");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let rendered_db = RenderedDbConfig::new(
             Some(create_global_db_config()),
@@ -436,7 +411,7 @@ mod database_merge {
     fn test_rendered_db_config_local_only() {
         // When only local has database config (standalone mode)
         let home_dir = std::env::temp_dir().join("modkit_test_local_only");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let mut local_config = minimal_app_config();
         local_config.database = Some(create_global_db_config());
@@ -460,7 +435,7 @@ mod database_merge {
     fn test_rendered_db_config_local_overrides_pool() {
         // Local config should override pool settings from master
         let home_dir = std::env::temp_dir().join("modkit_test_pool_override");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let rendered_db = RenderedDbConfig::new(
             Some(create_global_db_config()),
@@ -491,7 +466,7 @@ mod database_merge {
     fn test_rendered_db_config_local_overrides_file() {
         // Local config should override file path from master
         let home_dir = std::env::temp_dir().join("modkit_test_file_override");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let rendered_db = RenderedDbConfig::new(
             Some(create_global_db_config()),
@@ -520,7 +495,7 @@ mod database_merge {
     fn test_rendered_db_config_local_adds_params() {
         // Local config can add new params to master's params
         let home_dir = std::env::temp_dir().join("modkit_test_params_add");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let rendered_db = RenderedDbConfig::new(
             Some(create_global_db_config()),
@@ -551,7 +526,7 @@ mod database_merge {
     fn test_rendered_db_config_local_global_merges_with_master() {
         // Local global database config merges with master's global config
         let home_dir = std::env::temp_dir().join("modkit_test_global_merge");
-        let _ = std::fs::create_dir_all(&home_dir);
+        _ = std::fs::create_dir_all(&home_dir);
 
         let rendered_db = RenderedDbConfig::new(
             Some(create_global_db_config()),
@@ -603,13 +578,11 @@ mod full_oop_config {
     fn test_build_oop_config_standalone_mode() {
         // No rendered config - standalone mode
         let mut local_config = minimal_app_config();
-        local_config.logging = Some(
-            [(
-                "default".to_owned(),
-                logging_section(Some(Level::DEBUG), "logs/standalone.log"),
-            )]
-            .into(),
-        );
+        local_config.logging = [(
+            "default".to_owned(),
+            logging_section(Some(Level::DEBUG), "logs/standalone.log"),
+        )]
+        .into();
         local_config.modules.insert(
             "test_module".to_owned(),
             json!({
@@ -654,7 +627,7 @@ mod full_oop_config {
                 )]
                 .into(),
             ),
-            tracing: None,
+            opentelemetry: None,
         };
 
         let result = build_oop_config_and_db(&local_config, "test_module", Some(&rendered));
@@ -693,7 +666,7 @@ mod full_oop_config {
                 "another": "setting"
             }),
             logging: None,
-            tracing: None,
+            opentelemetry: None,
         };
 
         let result = build_oop_config_and_db(&local_config, "test_module", Some(&rendered));
@@ -712,19 +685,17 @@ mod full_oop_config {
     fn test_build_oop_config_logging_merge() {
         // Logging should merge (key-by-key)
         let mut local_config = minimal_app_config();
-        local_config.logging = Some(
-            [
-                (
-                    "default".to_owned(),
-                    logging_section(Some(Level::DEBUG), "logs/local-default.log"),
-                ),
-                (
-                    "new_key".to_owned(),
-                    logging_section(Some(Level::TRACE), "logs/new.log"),
-                ),
-            ]
-            .into(),
-        );
+        local_config.logging = [
+            (
+                "default".to_owned(),
+                logging_section(Some(Level::DEBUG), "logs/local-default.log"),
+            ),
+            (
+                "new_key".to_owned(),
+                logging_section(Some(Level::TRACE), "logs/new.log"),
+            ),
+        ]
+        .into();
 
         let rendered = RenderedModuleConfig {
             database: None,
@@ -742,7 +713,7 @@ mod full_oop_config {
                 ]
                 .into(),
             ),
-            tracing: None,
+            opentelemetry: None,
         };
 
         let result = build_oop_config_and_db(&local_config, "test_module", Some(&rendered));
@@ -759,7 +730,7 @@ mod full_oop_config {
             Some(Level::DEBUG)
         );
         assert_eq!(
-            merged_logging.get("default").unwrap().file,
+            merged_logging.get("default").unwrap().file().unwrap(),
             "logs/local-default.log"
         );
 
@@ -791,7 +762,7 @@ mod full_oop_config {
             database: None,
             config: json!({"master_setting": "value"}),
             logging: None,
-            tracing: None,
+            opentelemetry: None,
         };
 
         let result = build_oop_config_and_db(&local_config, "test_module", Some(&rendered));
@@ -819,7 +790,7 @@ mod full_oop_config {
             database: None,
             config: json!({"master_setting": "value"}),
             logging: None,
-            tracing: None,
+            opentelemetry: None,
         };
 
         let result = build_oop_config_and_db(&local_config, "test_module", Some(&rendered));

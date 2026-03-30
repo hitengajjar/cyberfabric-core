@@ -1,5 +1,28 @@
 # Technical Design — Todo App
 
+
+<!-- toc -->
+
+- [1. Architecture Overview](#1-architecture-overview)
+  - [1.1 Architectural Vision](#11-architectural-vision)
+  - [1.2 Architecture Drivers](#12-architecture-drivers)
+  - [1.3 Architecture Layers](#13-architecture-layers)
+- [2. Principles & Constraints](#2-principles--constraints)
+  - [2.1 Design Principles](#21-design-principles)
+  - [2.2 Constraints](#22-constraints)
+- [3. Technical Architecture](#3-technical-architecture)
+  - [3.1 Domain Model](#31-domain-model)
+  - [3.2 Component Model](#32-component-model)
+  - [3.3 API Contracts](#33-api-contracts)
+  - [3.4 Internal Dependencies](#34-internal-dependencies)
+  - [3.5 External Dependencies](#35-external-dependencies)
+  - [3.6 Interactions & Sequences](#36-interactions--sequences)
+  - [3.7 Database schemas & tables](#37-database-schemas--tables)
+- [4. Additional Context](#4-additional-context)
+- [5. Traceability](#5-traceability)
+
+<!-- /toc -->
+
 ## 1. Architecture Overview
 
 ### 1.1 Architectural Vision
@@ -16,10 +39,11 @@ Event-driven architecture is employed for real-time updates and cross-device syn
 
 | Requirement | Design Response |
 |-------------|-----------------|
-| `fdd-todo-app-req-create-task` | REST API endpoint POST /tasks with validation |
-| `fdd-todo-app-req-complete-task` | PATCH /tasks/:id with status toggle |
-| `fdd-todo-app-req-filter-tasks` | Query parameters on GET /tasks |
-| `fdd-todo-app-req-data-persistence` | IndexedDB local storage with sync queue |
+| `cpt-examples-todo-app-fr-create-task` | REST API endpoint POST /tasks with validation |
+| `cpt-examples-todo-app-fr-complete-task` | PATCH /tasks/:id with status toggle |
+| `cpt-examples-todo-app-fr-delete-task` | DELETE /tasks/:id endpoint with authorization |
+| `cpt-examples-todo-app-fr-filter-tasks` | Query parameters on GET /tasks |
+| `cpt-examples-todo-app-nfr-offline-support` | IndexedDB local storage with sync queue |
 
 #### NFR Allocation
 
@@ -27,8 +51,16 @@ This table maps non-functional requirements from PRD to specific design/architec
 
 | NFR ID | NFR Summary | Allocated To | Design Response | Verification Approach |
 |--------|-------------|--------------|-----------------|----------------------|
-| `fdd-todo-app-req-response-time` | UI interactions <200ms p95 | TaskService + IndexedDB | Local-first architecture: all reads from IndexedDB (sub-10ms), writes optimistic with background sync | Performance benchmarks measure p95 latency |
-| `fdd-todo-app-req-data-persistence` | Local persist <50ms, cloud sync <5s | SyncService + IndexedDB + REST API | IndexedDB for immediate local persistence; background WebSocket sync with retry queue | Integration tests verify timing + recovery scenarios |
+| `cpt-examples-todo-app-nfr-response-time` | UI interactions <200ms p95 | TaskService + IndexedDB | Local-first architecture: all reads from IndexedDB (sub-10ms), writes optimistic with background sync | Performance benchmarks measure p95 latency |
+| `cpt-examples-todo-app-nfr-data-persistence` | Local persist <50ms, cloud sync <5s | SyncService + IndexedDB + REST API | IndexedDB for immediate local persistence; background WebSocket sync with retry queue | Integration tests verify timing + recovery scenarios |
+
+#### Key ADRs
+
+| ADR ID | Decision Summary |
+|--------|------------------|
+| `cpt-examples-todo-app-adr-local-storage` | IndexedDB for offline-first local persistence |
+| `cpt-examples-todo-app-adr-optimistic-ui` | Optimistic UI updates with background reconciliation |
+| `cpt-examples-todo-app-adr-browser-support` | Support latest 2 versions of major browsers |
 
 ### 1.3 Architecture Layers
 
@@ -45,17 +77,17 @@ This table maps non-functional requirements from PRD to specific design/architec
 
 #### Offline-First
 
-- [ ] `p2` - **ID**: `fdd-todo-app-design-principle-offline-first`
+- [ ] `p2` - **ID**: `cpt-examples-todo-app-principle-offline-first`
 
-**ADRs**: `fdd-todo-app-adr-local-storage`
+**ADRs**: `cpt-examples-todo-app-adr-local-storage`
 
 All operations must work without network connectivity. Data is persisted locally first, then synchronized to the server when connection is available.
 
 #### Optimistic Updates
 
-- [ ] `p2` - **ID**: `fdd-todo-app-design-principle-optimistic-updates`
+- [ ] `p2` - **ID**: `cpt-examples-todo-app-principle-optimistic-updates`
 
-**ADRs**: `fdd-todo-app-adr-optimistic-ui`
+**ADRs**: `cpt-examples-todo-app-adr-optimistic-ui`
 
 UI updates immediately on user action without waiting for server confirmation. Rollback occurs only on server rejection.
 
@@ -63,9 +95,9 @@ UI updates immediately on user action without waiting for server confirmation. R
 
 #### Browser Compatibility
 
-- [ ] `p2` - **ID**: `fdd-todo-app-design-constraint-browser-compat`
+- [ ] `p2` - **ID**: `cpt-examples-todo-app-constraint-browser-compat`
 
-**ADRs**: `fdd-todo-app-adr-browser-support`
+**ADRs**: `cpt-examples-todo-app-adr-browser-support`
 
 Application must support latest 2 versions of Chrome, Firefox, Safari, and Edge.
 
@@ -78,9 +110,12 @@ Application must support latest 2 versions of Chrome, Firefox, Safari, and Edge.
 **Location**: [src/domain/entities](../src/domain/entities)
 
 **Core Entities**:
-- [Task](../src/domain/entities/task.ts) - Core task entity with title, status, priority
-- [Category](../src/domain/entities/category.ts) - Task grouping entity
-- [User](../src/domain/entities/user.ts) - User account entity
+
+| Entity | Description | Schema |
+|--------|-------------|--------|
+| Task | Core task entity with title, status, priority | [task.ts](../src/domain/entities/task.ts) |
+| Category | Task grouping entity | [category.ts](../src/domain/entities/category.ts) |
+| User | User account entity | [user.ts](../src/domain/entities/user.ts) |
 
 **Relationships**:
 - Task → Category: Many-to-one (task belongs to optional category)
@@ -90,56 +125,86 @@ Application must support latest 2 versions of Chrome, Firefox, Safari, and Edge.
 ### 3.2 Component Model
 
 ```mermaid
-flowchart LR
-    subgraph Frontend["React Frontend"]
-        App[App]
-        TaskList[TaskList]
-        TaskForm[TaskForm]
-        FilterBar[FilterBar]
-        SyncIndicator[SyncIndicator]
-    end
-
-    subgraph Services["Services"]
-        TaskService[TaskService]
-        SyncService[SyncService]
-    end
-
-    subgraph Storage["Storage"]
+graph TD
+    subgraph Frontend["Frontend (SPA)"]
+        UI[React UI Components]
+        TS[TaskService]
+        SS[SyncService]
         IDB[(IndexedDB)]
-        API[REST API]
     end
 
-    App --> TaskList
-    App --> TaskForm
-    App --> FilterBar
-    App --> SyncIndicator
+    subgraph Backend["Backend API"]
+        API[REST API]
+        WS[WebSocket Server]
+        DB[(PostgreSQL)]
+    end
 
-    TaskList --> TaskService
-    TaskForm --> TaskService
-    FilterBar --> TaskService
-    SyncIndicator --> SyncService
-
-    TaskService --> IDB
-    TaskService --> API
-    SyncService --> IDB
-    SyncService --> API
+    UI --> TS
+    TS --> IDB
+    TS --> SS
+    SS --> IDB
+    SS <--> WS
+    SS --> API
+    API --> DB
+    WS --> DB
 ```
 
-**Components**:
-- **TaskList**: Displays filtered list of tasks with pagination
-- **TaskForm**: Form for creating and editing tasks
-- **FilterBar**: Controls for filtering and sorting tasks
-- **SyncIndicator**: Shows synchronization status
+#### React UI
+
+**ID**: `cpt-examples-todo-app-component-react-ui`
+
+User interface rendering and input handling. Interface: React components, event handlers.
+
+#### TaskService
+
+**ID**: `cpt-examples-todo-app-component-task-service`
+
+Business logic orchestration, CRUD operations. Interface: TypeScript async methods.
+
+#### SyncService
+
+**ID**: `cpt-examples-todo-app-component-sync-service`
+
+Background synchronization, conflict resolution. Interface: Event-driven, queue-based.
+
+#### IndexedDB
+
+**ID**: `cpt-examples-todo-app-component-indexeddb`
+
+Local data persistence. Interface: Dexie.js wrapper API.
+
+#### REST API
+
+**ID**: `cpt-examples-todo-app-component-rest-api`
+
+Server-side task management. Interface: HTTP endpoints (see § 3.3).
+
+#### WebSocket Server
+
+**ID**: `cpt-examples-todo-app-component-websocket-server`
+
+Real-time sync notifications. Interface: JSON messages.
+
+#### PostgreSQL
+
+**ID**: `cpt-examples-todo-app-component-postgresql`
+
+Persistent data storage. Interface: SQL via backend.
 
 **Interactions**:
-- TaskForm → TaskService: Submits task data for creation/update
-- FilterBar → TaskList: Passes filter criteria for rendering
+- React UI → TaskService: Method calls for CRUD operations
+- TaskService → IndexedDB: Local persistence (immediate)
+- TaskService → SyncService: Queue sync operations
+- SyncService ↔ WebSocket: Bidirectional real-time updates
+- SyncService → REST API: HTTP requests for persistence
 
 ### 3.3 API Contracts
 
 **Technology**: REST/OpenAPI
 
-**Location**: [api/openapi.yaml](./api/openapi.yaml)
+**Public interface**: `cpt-examples-todo-app-interface-rest-api`
+
+**Location**: [api/openapi.yaml](../api/openapi.yaml)
 
 **Endpoints Overview**:
 
@@ -151,30 +216,65 @@ flowchart LR
 | `PATCH` | `/tasks/:id` | Update task fields | stable |
 | `DELETE` | `/tasks/:id` | Delete a task | stable |
 
-### 3.4 External Interfaces & Protocols
-
 #### WebSocket Sync Protocol
 
-- [x] `p1` - **ID**: `fdd-todo-app-design-interface-websocket`
+- [x] `p1` - **ID**: `cpt-examples-todo-app-interface-websocket`
 
-**Type**: Protocol (WebSocket + JSON)
+**Technology**: WebSocket + JSON
+**Protocol**: Messages follow format: `{ type: "sync" | "update" | "delete", payload: Task }`
+**References**: PRD `cpt-examples-todo-app-contract-sync`
+
+#### IndexedDB Local Storage Interface
+
+- [x] `p1` - **ID**: `cpt-examples-todo-app-interface-indexeddb`
+
+**Technology**: Dexie.js (IndexedDB wrapper)
+**Data Format**: Task objects with additional metadata (syncState, lastModified)
+
+### 3.4 Internal Dependencies
+
+No internal module dependencies — Todo App is a standalone module with no platform module consumers or providers.
+
+| Dependency Module | Interface Used | Purpose |
+|-------------------|---------------|--------|
+| (none) | — | — |
+
+### 3.5 External Dependencies
+
+#### WebSocket Sync Backend
+
+**Type**: External API
 **Direction**: bidirectional
-**Specification**: Custom sync protocol over WebSocket; messages follow format: `{ type: "sync" | "update" | "delete", payload: Task }`
-**Data Format**: JSON (follows Task model from `fdd-todo-app-interface-task-model`)
+**Protocol / Driver**: WebSocket + JSON; messages follow format: `{ type: "sync" | "update" | "delete", payload: Task }`
+**Data Format**: JSON (follows Task model from `cpt-examples-todo-app-interface-task-model`)
 **Compatibility**: Protocol version negotiated on connection; supports fallback to HTTP polling
-**References**: Links to PRD § Public Library Interfaces (`fdd-todo-app-contract-sync`)
+**References**: PRD `cpt-examples-todo-app-contract-sync`
 
-#### IndexedDB Storage Schema
+#### IndexedDB (Browser Local Storage)
 
-- [x] `p1` - **ID**: `fdd-todo-app-design-interface-indexeddb`
-
-**Type**: Data Format (IndexedDB schema)
-**Direction**: internal (library storage)
-**Specification**: Dexie.js schema with indexes on userId, status, categoryId, dueDate
+**Type**: Database
+**Direction**: bidirectional
+**Protocol / Driver**: Dexie.js (IndexedDB wrapper) with indexes on userId, status, categoryId, dueDate
 **Data Format**: Task objects stored as-is with additional metadata (syncState, lastModified)
 **Compatibility**: Schema migrations handled by Dexie.js version upgrade hooks
 
-### 3.5 Interactions & Sequences
+#### PostgreSQL
+
+- [x] `p1` - **ID**: `cpt-examples-todo-app-design-ext-postgresql`
+
+**Type**: Database
+**Direction**: outbound
+**Protocol / Driver**: PostgreSQL driver via Express backend
+**Data Format**: SQL (relational schema, see 3.7)
+**Compatibility**: Schema migrations managed via migration tool
+
+### 3.6 Interactions & Sequences
+
+#### Create Task (Optimistic UI + Local Persistence + API Sync)
+
+- [ ] `p1` - **ID**: `cpt-examples-todo-app-seq-create-task-v1`
+
+Sequence showing how a new task is created with optimistic UI update, immediate IndexedDB persistence, and eventual server persistence via REST API.
 
 ```mermaid
 sequenceDiagram
@@ -201,64 +301,36 @@ sequenceDiagram
     TS->>IDB: markSynced(task.id)
 ```
 
-**Use cases**: `fdd-todo-app-req-uc-create-task`
+**Use cases**: `cpt-examples-todo-app-usecase-create-task`
 
-**Actors**: `fdd-todo-app-actor-user`, `fdd-todo-app-actor-sync-service`
+**Actors**: `cpt-examples-todo-app-actor-user`, `cpt-examples-todo-app-actor-sync-service`
 
-### 3.6 Database schemas & tables
+### 3.7 Database schemas & tables
 
-#### Table tasks
+#### Table: tasks
 
-**ID**: `fdd-todo-app-db-table-tasks`
+**ID**: `cpt-examples-todo-app-design-db-tasks`
 
-**Schema**
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| id | UUID | PK | Primary key |
+| user_id | UUID | FK, NOT NULL | Foreign key to users |
+| title | VARCHAR(255) | NOT NULL | Task title |
+| description | TEXT | | Optional description |
+| status | ENUM | NOT NULL, DEFAULT 'active' | 'active', 'completed' |
+| priority | ENUM | NOT NULL | 'low', 'medium', 'high' |
+| category_id | UUID | FK | Optional foreign key to categories |
+| due_date | TIMESTAMP | | Optional due date |
+| created_at | TIMESTAMP | NOT NULL | Creation timestamp |
+| updated_at | TIMESTAMP | NOT NULL | Last update timestamp |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID | Primary key |
-| user_id | UUID | Foreign key to users |
-| title | VARCHAR(255) | Task title |
-| description | TEXT | Optional description |
-| status | ENUM | 'active', 'completed' |
-| priority | ENUM | 'low', 'medium', 'high' |
-| category_id | UUID | Optional foreign key |
-| due_date | TIMESTAMP | Optional due date |
-| created_at | TIMESTAMP | Creation timestamp |
-| updated_at | TIMESTAMP | Last update timestamp |
+**Indexes**: user_id, status, due_date
 
-**PK**: id
-
-**Constraints**: title NOT NULL, status NOT NULL DEFAULT 'active'
-
-**Additional info**: Indexed on user_id, status, due_date
-
-**Example**
-
-| id | user_id | title | status | priority |
-|----|---------|-------|--------|----------|
-| abc-123 | user-1 | Buy groceries | active | medium |
-
-### 3.7 Topology (optional)
-
-**ID**: `fdd-todo-app-topology-cloud`
-
-- Frontend: Static files on CDN
-- Backend: Containerized Node.js on Kubernetes
-- Database: Managed PostgreSQL
-- Cache: Redis cluster
-
-### 3.8 Tech stack (optional)
-
-**ID**: `fdd-todo-app-tech-stack`
-
-- Frontend: React 18, TypeScript, TailwindCSS, Zustand
-- Backend: Node.js, Express, TypeScript
-- Database: PostgreSQL 15, Redis 7
-- Infrastructure: Docker, Kubernetes, GitHub Actions
+**Notes**: status defaults to 'active' on insert
 
 ## 4. Additional Context
 
-**ID**: `fdd-todo-app-design-context-decisions`
+**ID**: `cpt-examples-todo-app-design-context-decisions`
 
 The choice of React over other frameworks was driven by team expertise and ecosystem maturity. PostgreSQL was selected for its reliability and JSON support for flexible task metadata.
 

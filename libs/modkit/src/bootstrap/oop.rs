@@ -37,7 +37,7 @@
 //!         print_config: false,
 //!         heartbeat_interval_secs: 5,
 //!     };
-//!     
+//!
 //!     run_oop_with_options(opts).await
 //! }
 //! ```
@@ -56,7 +56,7 @@ use super::config::{
     AppConfig, CliArgs, LoggingConfig, MODKIT_MODULE_CONFIG_ENV, RenderedDbConfig,
     RenderedModuleConfig,
 };
-use crate::bootstrap::host::init_logging_unified;
+use crate::bootstrap::host::{init_logging_unified, init_panic_tracing};
 use crate::runtime::{
     ClientRegistration, DbOptions, MODKIT_DIRECTORY_ENDPOINT_ENV, RunOptions, ShutdownOptions, run,
     shutdown,
@@ -66,7 +66,7 @@ use cf_system_sdks::directory::{DirectoryClient, DirectoryGrpcClient};
 /// Configuration options for `OoP` module bootstrap
 #[derive(Debug, Clone)]
 pub struct OopRunOptions {
-    /// Logical module name (e.g., "`file_parser`")
+    /// Logical module name (e.g., "`file-parser`")
     pub module_name: String,
 
     /// Instance ID (defaults to a random UUID if None)
@@ -179,7 +179,7 @@ fn build_oop_config_and_db(
     // Merge logging: master logging (base) + local logging (override by key)
     let final_logging = merge_logging_configs(
         rendered_config.as_ref().and_then(|r| r.logging.as_ref()),
-        local_config.logging.as_ref(),
+        &local_config.logging,
     );
 
     // Build DbOptions using Figment merge + DbManager
@@ -198,20 +198,13 @@ fn build_oop_config_and_db(
 ///
 /// Each key in the logging `HashMap` (e.g., "default", "calculator", "sqlx")
 /// is overridden by local if present.
-fn merge_logging_configs(
-    master: Option<&LoggingConfig>,
-    local: Option<&LoggingConfig>,
-) -> LoggingConfig {
-    let mut result = master.cloned().unwrap_or_default();
-
-    if let Some(local_logging) = local {
-        // Local keys override master keys
-        for (key, section) in local_logging {
-            result.insert(key.clone(), section.clone());
-        }
-    }
-
-    result
+fn merge_logging_configs(master: Option<&LoggingConfig>, local: &LoggingConfig) -> LoggingConfig {
+    master
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .chain(local.clone())
+        .collect()
 }
 
 /// Builds `DbOptions` by merging rendered config from master with local config.
@@ -385,7 +378,7 @@ fn merge_json_objects(target: &mut serde_json::Value, source: &serde_json::Value
 /// #[tokio::main]
 /// async fn main() -> anyhow::Result<()> {
 ///     let opts = OopRunOptions {
-///         module_name: "file_parser".to_string(),
+///         module_name: "file-parser".to_string(),
 ///         instance_id: None,
 ///         directory_endpoint: "http://127.0.0.1:50051".to_string(),
 ///         config_path: None,
@@ -423,6 +416,7 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
     tokio::spawn(async move {
         match shutdown::wait_for_shutdown().await {
             Ok(()) => {
+                info!(target: "", "------------------");
                 info!("shutdown: signal received in OoP bootstrap");
             }
             Err(e) => {
@@ -430,7 +424,7 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
                     error = %e,
                     "shutdown: primary waiter failed in OoP bootstrap, falling back to ctrl_c()"
                 );
-                let _ = tokio::signal::ctrl_c().await;
+                _ = tokio::signal::ctrl_c().await;
             }
         }
         cancel_for_signals.cancel();
@@ -448,7 +442,7 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
     };
 
     // Load configuration
-    let mut config = AppConfig::load_or_default(&opts.config_path)?;
+    let mut config = AppConfig::load_or_default(opts.config_path.as_ref())?;
     config.apply_cli_overrides(args.verbose);
 
     // Try to read rendered module config from master host via env var BEFORE logging init
@@ -465,19 +459,41 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
     let (final_config, merged_logging, db_options) =
         build_oop_config_and_db(&config, &opts.module_name, rendered_config.as_ref())?;
 
-    // Initialize OTEL layer from rendered config's tracing settings (if available)
-    // OoP modules use master's tracing config, not their own local config
+    // Use OpenTelemetry config from rendered (master) config only.
+    // OoP modules do not fall back to local config for telemetry — if the master
+    // does not provide an opentelemetry section, telemetry is skipped entirely.
     #[cfg(feature = "otel")]
-    let otel_layer = rendered_config
+    let otel_cfg = rendered_config
         .as_ref()
-        .and_then(|rc| rc.tracing.as_ref())
+        .and_then(|rc| rc.opentelemetry.as_ref());
+
+    // Initialize OTEL tracing layer (if tracing is enabled)
+    #[cfg(feature = "otel")]
+    let otel_layer = otel_cfg
+        .filter(|cfg| cfg.tracing.enabled)
         .map(crate::telemetry::init_tracing)
         .transpose()?;
     #[cfg(not(feature = "otel"))]
     let otel_layer = None;
 
+    // Initialize OpenTelemetry metrics provider (if configured and enabled).
+    // Store error to log after logging is initialized.
+    #[cfg(feature = "otel")]
+    let metrics_init_error = otel_cfg
+        .filter(|cfg| cfg.metrics.enabled)
+        .and_then(|cfg| crate::telemetry::init::init_metrics_provider(cfg).err());
+
     // Initialize logging with MERGED config (master base + local override)
     init_logging_unified(&merged_logging, &config.server.home_dir, otel_layer);
+
+    // Now that logging is available, report deferred metrics init error
+    #[cfg(feature = "otel")]
+    if let Some(e) = metrics_init_error {
+        tracing::error!(error = %e, "OpenTelemetry metrics not initialized (OoP)");
+    }
+
+    // Register custom panic hook to reroute panic backtrace into tracing.
+    init_panic_tracing();
 
     // Now we can log - report what we received from master
     if let Some(ref rc) = rendered_config {
@@ -486,7 +502,7 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
             has_database = rc.database.is_some(),
             has_config = !rc.config.is_null(),
             has_logging = rc.logging.is_some(),
-            has_tracing = rc.tracing.is_some(),
+            has_opentelemetry = rc.opentelemetry.is_some(),
             "Received rendered config from master host"
         );
     } else if std::env::var(MODKIT_MODULE_CONFIG_ENV).is_ok() {
@@ -510,7 +526,7 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
 
     // Print config and exit if requested
     if opts.print_config {
-        println!("{}", config.to_yaml()?);
+        print_config(&config);
         return Ok(());
     }
 
@@ -589,6 +605,18 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
     }
 
     result
+}
+
+#[allow(unknown_lints, de1301_no_print_macros)] // direct stdout config print before exit
+fn print_config(config: &AppConfig) {
+    match config.to_yaml() {
+        Ok(yaml) => {
+            println!("{yaml}");
+        }
+        Err(e) => {
+            eprintln!("Failed to render config as YAML: {e}");
+        }
+    }
 }
 
 #[cfg(test)]

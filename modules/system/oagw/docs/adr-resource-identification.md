@@ -39,6 +39,12 @@ alias. When subsub-tenant resolves alias `my-service`, system finds 3 upstreams 
 
 Separate concerns into three layers:
 
+Implementation note:
+
+- The layers below describe the **logical model**.
+- The current MVP storage approach can represent the tenant binding by storing one tenant-scoped row per binding (see `ADR: Storage Schema`).
+- Cross-tenant upstream *deduplication* (a shared upstream definition referenced by multiple tenant bindings) is deferred. It can be added later by splitting the shared, immutable core into a separate table (or by introducing a stable `definition_id` that multiple tenant rows can reference).
+
 **Layer 1: Upstream Definition (shared, immutable core)**
 
 - System-generated UUID as primary ID
@@ -167,7 +173,7 @@ When sub-tenant requests `/proxy/api.openai.com/...`:
 
 **Examples**:
 
-**Single hostname (alias auto-generated)**:
+**Single hostname (alias auto-derived)**:
 
 ```json
 {
@@ -177,7 +183,7 @@ When sub-tenant requests `/proxy/api.openai.com/...`:
 
 → System sets `alias = "api.openai.com"`
 
-**Multi-region with common suffix (alias auto-generated)**:
+**Multi-region with common suffix (alias auto-derived)**:
 
 ```json
 {
@@ -399,7 +405,7 @@ Content-Type: application/json
   "server": {
     "endpoints": [{ "scheme": "https", "host": "api.openai.com", "port": 443 }]
   },
-  "protocol": "gts.x.core.oagw.protocol.v1~x.core.http.v1",
+  "protocol": "gts.x.core.oagw.protocol.v1~x.core.oagw.http.v1",
   "tags": ["openai", "llm", "chat"],
   "auth": { "type": "...", "config": { ... } }
 }
@@ -428,7 +434,7 @@ Content-Type: application/json
   "server": {
     "endpoints": [{ "scheme": "https", "host": "10.0.1.1", "port": 443 }]
   },
-  "protocol": "gts.x.core.oagw.protocol.v1~x.core.http.v1",
+  "protocol": "gts.x.core.oagw.protocol.v1~x.core.oagw.http.v1",
   "alias": "my-internal-service",
   "tags": ["internal", "api"]
 }
@@ -545,7 +551,7 @@ Auth configuration references secrets via `cred_store` (Vault). OAGW does not ma
 ```json
 {
   "auth": {
-    "type": "gts.x.core.oagw.plugin.auth.v1~x.core.oagw.apikey.v1",
+    "type": "gts.x.core.oagw.auth_plugin.v1~x.core.oagw.apikey.v1",
     "config": {
       "header": "Authorization",
       "prefix": "Bearer ",
@@ -586,24 +592,24 @@ Customer Tenant:
 
 **Rate Limit Configuration**:
 
-| Parent Sharing | Child Value | Result                                  |
-|----------------|-------------|-----------------------------------------|
-| `private`      | null        | ✅ No rate limit from parent             |
-| `private`      | set         | ✅ Use child's limit                     |
-| `inherit`      | null        | ✅ Use parent's limit                    |
-| `inherit`      | set         | ✅ Use **min**(parent, child) - stricter |
-| `enforce`      | null        | ✅ Use parent's limit                    |
-| `enforce`      | set         | ✅ Use **min**(parent, child) - stricter |
+| Parent Sharing | Child Value | Result                                |
+|----------------|-------------|---------------------------------------|
+| `private`      | null        | No rate limit from parent             |
+| `private`      | set         | Use child's limit                     |
+| `inherit`      | null        | Use parent's limit                    |
+| `inherit`      | set         | Use **min**(parent, child) - stricter |
+| `enforce`      | null        | Use parent's limit                    |
+| `enforce`      | set         | Use **min**(parent, child) - stricter |
 
 **Plugins Configuration**:
 
-| Parent Sharing | Child Value | Result                                   |
-|----------------|-------------|------------------------------------------|
-| `private`      | any         | ✅ Use child's plugins only               |
-| `inherit`      | null        | ✅ Use parent's plugins                   |
-| `inherit`      | set         | ✅ Concat: parent.plugins + child.plugins |
-| `enforce`      | null        | ✅ Use parent's plugins                   |
-| `enforce`      | set         | ✅ Concat: parent.plugins + child.plugins |
+| Parent Sharing | Child Value | Result                                 |
+|----------------|-------------|----------------------------------------|
+| `private`      | any         | Use child's plugins only               |
+| `inherit`      | null        | Use parent's plugins                   |
+| `inherit`      | set         | Concat: parent.plugins + child.plugins |
+| `enforce`      | null        | Use parent's plugins                   |
+| `enforce`      | set         | Concat: parent.plugins + child.plugins |
 
 #### Binding Schema with Sharing
 
@@ -671,10 +677,10 @@ X-Tenant-ID: partner-uuid
   "server": {
     "endpoints": [{ "scheme": "https", "host": "api.openai.com", "port": 443 }]
   },
-  "protocol": "gts.x.core.oagw.protocol.v1~x.core.http.v1",
+  "protocol": "gts.x.core.oagw.protocol.v1~x.core.oagw.http.v1",
   "tags": ["openai", "llm"],
   "auth": {
-    "type": "gts.x.core.oagw.plugin.auth.v1~x.core.oagw.apikey.v1",
+    "type": "gts.x.core.oagw.auth_plugin.v1~x.core.oagw.apikey.v1",
     "config": { 
       "header": "Authorization", 
       "prefix": "Bearer ",
@@ -688,7 +694,7 @@ X-Tenant-ID: partner-uuid
   },
   "plugins": {
     "sharing": "inherit",
-    "items": ["gts.x.core.oagw.plugin.filter.v1~x.core.oagw.logging.v1"]
+    "items": ["gts.x.core.oagw.transform_plugin.v1~x.core.oagw.logging.v1"]
   }
 }
 ```
@@ -703,9 +709,9 @@ X-Tenant-ID: customer-uuid
   "server": {
     "endpoints": [{ "scheme": "https", "host": "api.openai.com", "port": 443 }]
   },
-  "protocol": "gts.x.core.oagw.protocol.v1~x.core.http.v1",
+  "protocol": "gts.x.core.oagw.protocol.v1~x.core.oagw.http.v1",
   "auth": {
-    "type": "gts.x.core.oagw.plugin.auth.v1~x.core.oagw.apikey.v1",
+    "type": "gts.x.core.oagw.auth_plugin.v1~x.core.oagw.apikey.v1",
     "config": { 
       "header": "Authorization", 
       "prefix": "Bearer ",
@@ -756,9 +762,9 @@ X-Tenant-ID: customer-uuid
   "server": {
     "endpoints": [{ "scheme": "https", "host": "api.openai.com", "port": 443 }]
   },
-  "protocol": "gts.x.core.oagw.protocol.v1~x.core.http.v1",
+  "protocol": "gts.x.core.oagw.protocol.v1~x.core.oagw.http.v1",
   "auth": {
-    "type": "gts.x.core.oagw.plugin.auth.v1~x.core.oagw.apikey.v1",
+    "type": "gts.x.core.oagw.auth_plugin.v1~x.core.oagw.apikey.v1",
     "config": { 
       "header": "Authorization", 
       "prefix": "Bearer ",

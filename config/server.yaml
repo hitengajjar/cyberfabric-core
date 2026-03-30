@@ -47,7 +47,7 @@ logging:
     max_backups: 3
     max_size_mb: 1000
   # api_gateway section
-  api_gateway:
+  api-gateway:
     console_level: info
     file: "logs/api.log"
     file_level: warn
@@ -57,7 +57,7 @@ logging:
 
 # Per-module configurations moved under modules section
 modules:
-  api_gateway:
+  api-gateway:
     # No database needed for api_gateway
     config:
       bind_addr: "127.0.0.1:8087"
@@ -266,8 +266,9 @@ modules:
         username: "user"
 
   # File parser module configuration (no database needed)
-  file_parser:
+  file-parser:
     config:
+      allowed_local_base_dir: /data/documents
       parser_extension_map:
       builtin:
         - "js"
@@ -403,3 +404,20 @@ modules:
           verify_cert: true
         urls:
           - "https://api.openai.com"
+
+# OpenTelemetry configuration (resource identity, tracing, metrics)
+opentelemetry:
+  resource:
+    service_name: "hyperspot-api"
+
+  # Default exporter shared by tracing and metrics
+  exporter:
+    kind: "otlp_grpc"  # or "otlp_http"
+    endpoint: "http://127.0.0.1:4317"
+    timeout_ms: 5000
+
+  tracing:
+    enabled: false
+
+  metrics:
+    enabled: false

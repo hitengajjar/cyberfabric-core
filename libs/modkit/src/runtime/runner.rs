@@ -11,7 +11,7 @@
 //! - Shutdown can be driven by OS signals, an external `CancellationToken`,
 //!   or an arbitrary future.
 //! - Pre-registered clients can be injected into the `ClientHub` via `RunOptions::clients`.
-//! - `OoP` modules are spawned after the start phase so that `grpc_hub` is already running
+//! - `OoP` modules are spawned after the start phase so that `grpc-hub` is already running
 //!   and the real directory endpoint is known.
 
 use crate::backends::OopBackend;
@@ -116,7 +116,7 @@ pub struct RunOptions {
     pub instance_id: Uuid,
     /// `OoP` module spawn configuration.
     ///
-    /// These modules are spawned after the start phase, once `grpc_hub` is running
+    /// These modules are spawned after the start phase, once `grpc-hub` is running
     /// and the real directory endpoint is known.
     pub oop: Option<OopSpawnOptions>,
 }
@@ -142,6 +142,7 @@ pub async fn run(opts: RunOptions) -> anyhow::Result<()> {
             tokio::spawn(async move {
                 match shutdown::wait_for_shutdown().await {
                     Ok(()) => {
+                        tracing::info!(target: "", "------------------");
                         tracing::info!("shutdown: signal received");
                     }
                     Err(e) => {
@@ -149,7 +150,7 @@ pub async fn run(opts: RunOptions) -> anyhow::Result<()> {
                             error = %e,
                             "shutdown: primary waiter failed; falling back to ctrl_c()"
                         );
-                        let _ = tokio::signal::ctrl_c().await;
+                        _ = tokio::signal::ctrl_c().await;
                     }
                 }
                 c.cancel();

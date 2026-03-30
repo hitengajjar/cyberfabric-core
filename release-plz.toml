@@ -1,7 +1,7 @@
 [workspace]
 # Keep the defaults simple and explicit. We rely on Cargo manifests for:
 # - which crates are publishable (`publish = false` disables)
-# - per-crate versioning (explicit `version = ...` for modules/sdks, and `version.workspace = true` for ModKit libs)
+# - per-crate versioning (every crate has its own explicit `version = ...`)
 #
 # NOTE: release-plz may temporarily checkout commits while computing diffs.
 # Some repos can end up "dirty" due to generated/normalized files, so we allow it.
@@ -16,12 +16,10 @@ git_release_enable = true
 changelog_path = "CHANGELOG.md"
 
 # Enable semver checks by default (can be overridden per package if needed later).
-# NOTE: For the initial bootstrap (when crates may not exist on crates.io yet),
-# semver checks are noisy and can fail. Re-enable after the first successful publish.
-semver_check = false
+semver_check = true
 
 # To prevent crates.io throttling
-publish_timeout = "7m"
+publish_timeout = "10m"
 
 [changelog]
 body = """
@@ -141,3 +139,128 @@ git_release_enable = false
 name = "cf-modkit-utils"
 changelog_update = false
 git_release_enable = false
+
+# System SDK libraries - published to crates.io but without separate changelog/releases
+[[package]]
+name = "cf-system-sdks"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-system-sdk-directory"
+changelog_update = false
+git_release_enable = false
+
+# System modules and their SDKs - published to crates.io but without separate changelog/releases
+[[package]]
+name = "cf-api-gateway"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-grpc-hub"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-file-parser"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-nodes-registry"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-nodes-registry-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-module-orchestrator"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-types-registry"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-types-registry-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-simple-user-settings"
+publish = false
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-simple-user-settings-sdk"
+publish = false
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-tenant-resolver-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-tenant-resolver"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-authn-resolver-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-authn-resolver"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-authz-resolver-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-authz-resolver"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-oagw-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-oagw"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-credstore-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-credstore"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-mini-chat-sdk"
+changelog_update = false
+git_release_enable = false
+
+[[package]]
+name = "cf-mini-chat"
+changelog_update = false
+git_release_enable = false
+

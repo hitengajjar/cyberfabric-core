@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
 
 | Field | Description |
 |-------|-------------|
-| `module_name` | Logical module name (e.g., "file_parser") |
+| `module_name` | Logical module name (e.g., "file-parser") |
 | `instance_id` | Instance ID (defaults to random UUID) |
 | `directory_endpoint` | DirectoryService gRPC endpoint |
 | `config_path` | Path to configuration file |
@@ -383,12 +383,12 @@ impl MyModule {
 
 > The `client = ...` attribute validates the trait at compile time and exposes MODULE_NAME, but does not auto-register the client into ClientHub. You must still register it explicitly in your `init()` method using `ctx.client_hub().register::<dyn my_module_sdk::MyModuleApi>(client)`. 
 
-## Client Registration (in gateway)
+## Client Registration (in module)
 
 ### Register both local and remote clients
 
 ```rust
-// In gateway's init()
+// In module's init()
 async fn register_clients(&self, ctx: &ModuleCtx) -> anyhow::Result<()> {
     // Try local client first
     if let Ok(local_client) = ctx.client_hub().try_get::<dyn my_module_sdk::MyModuleApi>() {
@@ -436,6 +436,6 @@ async fn test_grpc_client() {
 - [ ] Define `.proto` file and generate gRPC stubs in SDK.
 - [ ] Implement gRPC server in module crate.
 - [ ] Use `modkit_transport_grpc::client` utilities for connections.
-- [ ] Register both local and remote clients in gateway.
+- [ ] Register both local and remote clients in module.
 - [ ] Use `CancellationToken` for coordinated shutdown.
 - [ ] Test with mock gRPC servers.

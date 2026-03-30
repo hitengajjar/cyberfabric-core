@@ -40,7 +40,7 @@ All modules can be divided into several categories:
 The **Core Platform Integration Modules** layer abstracts integration with core platform services, such as IdP, policy management, licensing, and credentials management that is out of scope of HyperSpot. This keeps HyperSpot reusable: it can run as a standalone platform, or it can integrate into an existing enterprise platform by wiring adapters to the platform’s services.
 
 ## Dependency rules
-- Authentication/authorization: all **external HTTP** traffic is enforced by `api_gateway` middleware, and secure ORM access is scoped by `SecurityContext`. In-process calls must propagate `SecurityContext` and use SDK/clients; bypassing middlewares is not permitted for gateway paths.
+- Authentication/authorization: all **external HTTP** traffic is enforced by `api-gateway` middleware, and secure ORM access is scoped by `SecurityContext`. In-process calls must propagate `SecurityContext` and use SDK/clients; bypassing middlewares is not permitted for gateway paths.
 - Generative AI Modules MAY depend on Shared Control Plane Modules
 - Generative AI Modules MUST NOT depend on Core Platform Services directly
 - Control Plane Modules MUST NOT depend on GenAI Modules
@@ -114,7 +114,7 @@ Maintain a catalog of available models with tenant-level availability and approv
 - [ ] p3 - auto-approval configuration per tenant/provider
 - [ ] p4 - model lifecycle tracking (deprecated, archived)
 #### More details
-- [PRD](../modules/model_registry/docs/PRD.md)
+- [PRD](../modules/model-registry/docs/PRD.md)
 - TODO: Scenarios link
 - TODO: API link
 - TODO: SDK link
@@ -157,7 +157,7 @@ Provide unified access to multiple LLM providers with multimodal support, tool c
 - [ ] p3 - embeddings batching
 - [ ] p4 - audit events (audit plugin)
 #### More details
-- [PRD](../modules/llm_gateway/docs/PRD.md)
+- [PRD](../modules/llm-gateway/docs/PRD.md)
 - TODO: Scenarios link
 - TODO: API link
 - TODO: SDK link
@@ -269,7 +269,7 @@ Store and retrieve files and media for LLM Gateway (input-media assets, generate
 - [ ] p3 - encryption, retention, and lifecycle policies
 - [ ] p4 - compliance exports and legal hold support
 #### More details
-- [PRD](../modules/file_storage/docs/PRD.md)
+- [PRD](../modules/file-storage/docs/PRD.md)
 - TODO: Scenarios link
 - TODO: API link
 - TODO: SDK link
@@ -441,7 +441,7 @@ GTS schema-storage service for tool definitions and contracts.
 - [ ] p2 - distribute GTS instances and schemas updates across modules safely via events generation
 - [ ] p3 - schemas and instances import/export in different formats (YAML, RAML)
 #### More details
-- [PRD](../modules/type_registry/docs/PRD.md)
+- [PRD](../modules/system/types-registry/docs/PRD.md)
 - TODO: Scenarios link
 - TODO: API link
 - TODO: SDK link
@@ -486,6 +486,28 @@ Provide monitoring primitives and integrations: health checks, alerts, and opera
 - [ ] p5 - automated remediation workflows
 #### More details
 - TODO: Design link
+- TODO: Scenarios link
+- TODO: API link
+- TODO: SDK link
+
+### Simple Resource Registry
+#### Responsibility
+Provide generic CRUD storage for typed resources that do not warrant a dedicated module, using a fixed schema envelope (identity, ownership, timestamps) and a flexible JSON payload governed by GTS type definitions.
+#### High Level Scenarios
+- [ ] p1 - create, read, update, and soft-delete typed resources with tenant isolation and GTS type-based access control
+- [ ] p1 - OData $filter/$orderby and cursor-based pagination on schema fields
+- [ ] p1 - GTS type existence validation via Types Registry
+- [ ] p1 - pluggable storage backend (Relational Database plugin via SecureORM as default)
+- [ ] p1 - configurable soft-delete retention with background purge task
+- [ ] p2 - batch CRUD operations (POST /resources:batch, POST /resources:batch-get) per DNA BATCH.md
+- [ ] p2 - per-resource-type lifecycle notification events (created/updated/deleted) via Events Broker
+- [ ] p2 - per-resource-type audit events via Audit Module
+- [ ] p3 - alternative storage plugins (search engines, vendor-provided backends) with per-type routing
+- [ ] p3 - resource groups for lifecycle-linked collections
+- [ ] p4 - full-text search API with search-capable plugin support
+#### More details
+- [PRD](../modules/simple-resource-registry/docs/PRD.md)
+- [Design](../modules/simple-resource-registry/docs/DESIGN.md)
 - TODO: Scenarios link
 - TODO: API link
 - TODO: SDK link
@@ -659,7 +681,7 @@ Centralized gateway for external-API calls with credentials injection, reliabili
 
 ## Sub-scenario - incoming API call processing
 
-This diagram reflects the **actual middleware stack** from `api_gateway` (see `apply_middleware_stack` in `modules/system/api_gateway/src/lib.rs`).
+This diagram reflects the **actual middleware stack** from `api-gateway` (see `apply_middleware_stack` in `modules/system/api-gateway/src/lib.rs`).
 
 **Middleware execution order (outermost → innermost):**
 1. Request ID (SetRequestId + PropagateRequestId)
@@ -687,7 +709,7 @@ sequenceDiagram
   end
 
   box "HyperSpot"
-    participant I as API gateway (api_gateway)
+    participant I as API gateway (api-gateway)
     participant LIC as License resolver
     participant M as Target module (REST handler)
     participant D as Domain service

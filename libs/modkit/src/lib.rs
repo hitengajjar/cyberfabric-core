@@ -94,7 +94,10 @@ pub use client_hub::ClientHub;
 pub use registry::ModuleRegistry;
 
 // Re-export the macros from the proc-macro crate
-pub use modkit_macros::{lifecycle, module};
+pub use modkit_macros::{ExpandVars, lifecycle, module};
+
+// Re-export var_expand module so derive-generated impls resolve via ::modkit::var_expand
+pub use modkit_utils::var_expand;
 
 // Core module contracts and traits
 pub mod contracts;
@@ -111,7 +114,6 @@ pub mod http;
 pub use api::problem::{
     Problem, ValidationError, bad_request, conflict, internal_error, not_found,
 };
-pub use http::client::TracedClient;
 pub use http::sse::SseBroadcaster;
 
 // Telemetry utilities
@@ -129,10 +131,9 @@ pub mod errors;
 pub mod result;
 pub use result::ApiResult;
 
-// Domain layer support (DDD patterns)
-#[doc(hidden)]
+// Domain layer marker traits for DDD enforcement
 pub mod domain;
-pub use domain::DomainModel;
+pub use domain::{DomainErrorMarker, DomainModel};
 
 // Directory API for service discovery
 pub mod directory;
